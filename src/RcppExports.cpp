@@ -13,7 +13,7 @@ Rcpp::Rostream<false>& Rcpp::Rcerr = Rcpp::Rcpp_cerr_get();
 
 // rcppClusteringEMGlassoWeighted
 IntegerVector rcppClusteringEMGlassoWeighted(List InputList, double l, double r, arma::cube Pk_in, double tol, int max_iter);
-RcppExport SEXP _SelvarMix_rcppClusteringEMGlassoWeighted(SEXP InputListSEXP, SEXP lSEXP, SEXP rSEXP, SEXP Pk_inSEXP, SEXP tolSEXP, SEXP max_iterSEXP) {
+RcppExport SEXP _SelvarMixExt_rcppClusteringEMGlassoWeighted(SEXP InputListSEXP, SEXP lSEXP, SEXP rSEXP, SEXP Pk_inSEXP, SEXP tolSEXP, SEXP max_iterSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -29,7 +29,7 @@ END_RCPP
 }
 // rcppDiscriminantAnalysisGlasso
 IntegerVector rcppDiscriminantAnalysisGlasso(NumericMatrix X_, IntegerVector labels_, const int nbClust, double l, double r);
-RcppExport SEXP _SelvarMix_rcppDiscriminantAnalysisGlasso(SEXP X_SEXP, SEXP labels_SEXP, SEXP nbClustSEXP, SEXP lSEXP, SEXP rSEXP) {
+RcppExport SEXP _SelvarMixExt_rcppDiscriminantAnalysisGlasso(SEXP X_SEXP, SEXP labels_SEXP, SEXP nbClustSEXP, SEXP lSEXP, SEXP rSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -44,7 +44,7 @@ END_RCPP
 }
 // LoglikelihoodObsGaussian
 List LoglikelihoodObsGaussian(NumericMatrix YNA, List mu, List sigma, NumericMatrix alpha, NumericVector prop_pi);
-RcppExport SEXP _SelvarMix_LoglikelihoodObsGaussian(SEXP YNASEXP, SEXP muSEXP, SEXP sigmaSEXP, SEXP alphaSEXP, SEXP prop_piSEXP) {
+RcppExport SEXP _SelvarMixExt_LoglikelihoodObsGaussian(SEXP YNASEXP, SEXP muSEXP, SEXP sigmaSEXP, SEXP alphaSEXP, SEXP prop_piSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -59,7 +59,7 @@ END_RCPP
 }
 // InitEMGaussian
 List InitEMGaussian(NumericMatrix YNA, int K, std::string mecha, bool diag, Nullable<List> init, Nullable<int> samplesize);
-RcppExport SEXP _SelvarMix_InitEMGaussian(SEXP YNASEXP, SEXP KSEXP, SEXP mechaSEXP, SEXP diagSEXP, SEXP initSEXP, SEXP samplesizeSEXP) {
+RcppExport SEXP _SelvarMixExt_InitEMGaussian(SEXP YNASEXP, SEXP KSEXP, SEXP mechaSEXP, SEXP diagSEXP, SEXP initSEXP, SEXP samplesizeSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -75,7 +75,7 @@ END_RCPP
 }
 // MechanismEMGLM
 NumericMatrix MechanismEMGLM(NumericMatrix YNA, NumericMatrix tik, std::string mecha);
-RcppExport SEXP _SelvarMix_MechanismEMGLM(SEXP YNASEXP, SEXP tikSEXP, SEXP mechaSEXP) {
+RcppExport SEXP _SelvarMixExt_MechanismEMGLM(SEXP YNASEXP, SEXP tikSEXP, SEXP mechaSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -88,7 +88,7 @@ END_RCPP
 }
 // EMGaussian
 List EMGaussian(NumericMatrix YNA, int K, std::string mecha, bool diag, int rmax, Nullable<List> init, double tol, Nullable<int> samplesize);
-RcppExport SEXP _SelvarMix_EMGaussian(SEXP YNASEXP, SEXP KSEXP, SEXP mechaSEXP, SEXP diagSEXP, SEXP rmaxSEXP, SEXP initSEXP, SEXP tolSEXP, SEXP samplesizeSEXP) {
+RcppExport SEXP _SelvarMixExt_EMGaussian(SEXP YNASEXP, SEXP KSEXP, SEXP mechaSEXP, SEXP diagSEXP, SEXP rmaxSEXP, SEXP initSEXP, SEXP tolSEXP, SEXP samplesizeSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -106,7 +106,7 @@ END_RCPP
 }
 // LoglikelihoodObsGaussianMixed
 List LoglikelihoodObsGaussianMixed(const NumericMatrix& YNA, const List& mu, const List& sigma, const NumericMatrix& alpha, const NumericMatrix& beta, const NumericVector& prop_pi, const LogicalVector& is_mnar, /* optional: conditional mean & variance of Y_ij for missing cells */     Nullable<List> E_mu_list, Nullable<List> E_sig_list);
-RcppExport SEXP _SelvarMix_LoglikelihoodObsGaussianMixed(SEXP YNASEXP, SEXP muSEXP, SEXP sigmaSEXP, SEXP alphaSEXP, SEXP betaSEXP, SEXP prop_piSEXP, SEXP is_mnarSEXP, SEXP E_mu_listSEXP, SEXP E_sig_listSEXP) {
+RcppExport SEXP _SelvarMixExt_LoglikelihoodObsGaussianMixed(SEXP YNASEXP, SEXP muSEXP, SEXP sigmaSEXP, SEXP alphaSEXP, SEXP betaSEXP, SEXP prop_piSEXP, SEXP is_mnarSEXP, SEXP E_mu_listSEXP, SEXP E_sig_listSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -125,7 +125,7 @@ END_RCPP
 }
 // InitEMGaussianMixed
 List InitEMGaussianMixed(NumericMatrix YNA, int K, std::string mecha, LogicalVector is_mnar, bool diag, Nullable<List> init, Nullable<int> samplesize);
-RcppExport SEXP _SelvarMix_InitEMGaussianMixed(SEXP YNASEXP, SEXP KSEXP, SEXP mechaSEXP, SEXP is_mnarSEXP, SEXP diagSEXP, SEXP initSEXP, SEXP samplesizeSEXP) {
+RcppExport SEXP _SelvarMixExt_InitEMGaussianMixed(SEXP YNASEXP, SEXP KSEXP, SEXP mechaSEXP, SEXP is_mnarSEXP, SEXP diagSEXP, SEXP initSEXP, SEXP samplesizeSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -142,7 +142,7 @@ END_RCPP
 }
 // MechanismEMGLMMixed
 List MechanismEMGLMMixed(NumericMatrix YNA, NumericMatrix tik, std::string mecha, LogicalVector is_mnar, List E_y_list, NumericMatrix current_alpha, NumericMatrix current_beta);
-RcppExport SEXP _SelvarMix_MechanismEMGLMMixed(SEXP YNASEXP, SEXP tikSEXP, SEXP mechaSEXP, SEXP is_mnarSEXP, SEXP E_y_listSEXP, SEXP current_alphaSEXP, SEXP current_betaSEXP) {
+RcppExport SEXP _SelvarMixExt_MechanismEMGLMMixed(SEXP YNASEXP, SEXP tikSEXP, SEXP mechaSEXP, SEXP is_mnarSEXP, SEXP E_y_listSEXP, SEXP current_alphaSEXP, SEXP current_betaSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -159,7 +159,7 @@ END_RCPP
 }
 // EMGaussianMixed
 List EMGaussianMixed(NumericMatrix YNA, int K, std::string mecha, LogicalVector is_mnar, bool diag, int rmax, Nullable<List> init, double tol, Nullable<int> samplesize);
-RcppExport SEXP _SelvarMix_EMGaussianMixed(SEXP YNASEXP, SEXP KSEXP, SEXP mechaSEXP, SEXP is_mnarSEXP, SEXP diagSEXP, SEXP rmaxSEXP, SEXP initSEXP, SEXP tolSEXP, SEXP samplesizeSEXP) {
+RcppExport SEXP _SelvarMixExt_EMGaussianMixed(SEXP YNASEXP, SEXP KSEXP, SEXP mechaSEXP, SEXP is_mnarSEXP, SEXP diagSEXP, SEXP rmaxSEXP, SEXP initSEXP, SEXP tolSEXP, SEXP samplesizeSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -178,7 +178,7 @@ END_RCPP
 }
 // rcppSelectS
 List rcppSelectS(NumericMatrix X, std::vector<int> Order, const int nbCluster, std::string framework, std::string model_name, const int packSize, std::string Crit, IntegerVector knownlabels, IntegerVector DA);
-RcppExport SEXP _SelvarMix_rcppSelectS(SEXP XSEXP, SEXP OrderSEXP, SEXP nbClusterSEXP, SEXP frameworkSEXP, SEXP model_nameSEXP, SEXP packSizeSEXP, SEXP CritSEXP, SEXP knownlabelsSEXP, SEXP DASEXP) {
+RcppExport SEXP _SelvarMixExt_rcppSelectS(SEXP XSEXP, SEXP OrderSEXP, SEXP nbClusterSEXP, SEXP frameworkSEXP, SEXP model_nameSEXP, SEXP packSizeSEXP, SEXP CritSEXP, SEXP knownlabelsSEXP, SEXP DASEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -197,7 +197,7 @@ END_RCPP
 }
 // rcppSelectW
 IntegerVector rcppSelectW(NumericMatrix X, std::vector<int> Order, std::vector<int> OtherVar, const int packSize);
-RcppExport SEXP _SelvarMix_rcppSelectW(SEXP XSEXP, SEXP OrderSEXP, SEXP OtherVarSEXP, SEXP packSizeSEXP) {
+RcppExport SEXP _SelvarMixExt_rcppSelectW(SEXP XSEXP, SEXP OrderSEXP, SEXP OtherVarSEXP, SEXP packSizeSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -211,7 +211,7 @@ END_RCPP
 }
 // rcppSelectR
 IntegerVector rcppSelectR(NumericMatrix X, std::vector<int> S, std::vector<int> U, std::string regmodel);
-RcppExport SEXP _SelvarMix_rcppSelectR(SEXP XSEXP, SEXP SSEXP, SEXP USEXP, SEXP regmodelSEXP) {
+RcppExport SEXP _SelvarMixExt_rcppSelectR(SEXP XSEXP, SEXP SSEXP, SEXP USEXP, SEXP regmodelSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -225,7 +225,7 @@ END_RCPP
 }
 // rcppCrit
 List rcppCrit(NumericMatrix X, List MyList, std::vector<std::string> rgm, std::vector<std::string> idm);
-RcppExport SEXP _SelvarMix_rcppCrit(SEXP XSEXP, SEXP MyListSEXP, SEXP rgmSEXP, SEXP idmSEXP) {
+RcppExport SEXP _SelvarMixExt_rcppCrit(SEXP XSEXP, SEXP MyListSEXP, SEXP rgmSEXP, SEXP idmSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -239,24 +239,24 @@ END_RCPP
 }
 
 static const R_CallMethodDef CallEntries[] = {
-    {"_SelvarMix_rcppClusteringEMGlassoWeighted", (DL_FUNC) &_SelvarMix_rcppClusteringEMGlassoWeighted, 6},
-    {"_SelvarMix_rcppDiscriminantAnalysisGlasso", (DL_FUNC) &_SelvarMix_rcppDiscriminantAnalysisGlasso, 5},
-    {"_SelvarMix_LoglikelihoodObsGaussian", (DL_FUNC) &_SelvarMix_LoglikelihoodObsGaussian, 5},
-    {"_SelvarMix_InitEMGaussian", (DL_FUNC) &_SelvarMix_InitEMGaussian, 6},
-    {"_SelvarMix_MechanismEMGLM", (DL_FUNC) &_SelvarMix_MechanismEMGLM, 3},
-    {"_SelvarMix_EMGaussian", (DL_FUNC) &_SelvarMix_EMGaussian, 8},
-    {"_SelvarMix_LoglikelihoodObsGaussianMixed", (DL_FUNC) &_SelvarMix_LoglikelihoodObsGaussianMixed, 9},
-    {"_SelvarMix_InitEMGaussianMixed", (DL_FUNC) &_SelvarMix_InitEMGaussianMixed, 7},
-    {"_SelvarMix_MechanismEMGLMMixed", (DL_FUNC) &_SelvarMix_MechanismEMGLMMixed, 7},
-    {"_SelvarMix_EMGaussianMixed", (DL_FUNC) &_SelvarMix_EMGaussianMixed, 9},
-    {"_SelvarMix_rcppSelectS", (DL_FUNC) &_SelvarMix_rcppSelectS, 9},
-    {"_SelvarMix_rcppSelectW", (DL_FUNC) &_SelvarMix_rcppSelectW, 4},
-    {"_SelvarMix_rcppSelectR", (DL_FUNC) &_SelvarMix_rcppSelectR, 4},
-    {"_SelvarMix_rcppCrit", (DL_FUNC) &_SelvarMix_rcppCrit, 4},
+    {"_SelvarMixExt_rcppClusteringEMGlassoWeighted", (DL_FUNC) &_SelvarMixExt_rcppClusteringEMGlassoWeighted, 6},
+    {"_SelvarMixExt_rcppDiscriminantAnalysisGlasso", (DL_FUNC) &_SelvarMixExt_rcppDiscriminantAnalysisGlasso, 5},
+    {"_SelvarMixExt_LoglikelihoodObsGaussian", (DL_FUNC) &_SelvarMixExt_LoglikelihoodObsGaussian, 5},
+    {"_SelvarMixExt_InitEMGaussian", (DL_FUNC) &_SelvarMixExt_InitEMGaussian, 6},
+    {"_SelvarMixExt_MechanismEMGLM", (DL_FUNC) &_SelvarMixExt_MechanismEMGLM, 3},
+    {"_SelvarMixExt_EMGaussian", (DL_FUNC) &_SelvarMixExt_EMGaussian, 8},
+    {"_SelvarMixExt_LoglikelihoodObsGaussianMixed", (DL_FUNC) &_SelvarMixExt_LoglikelihoodObsGaussianMixed, 9},
+    {"_SelvarMixExt_InitEMGaussianMixed", (DL_FUNC) &_SelvarMixExt_InitEMGaussianMixed, 7},
+    {"_SelvarMixExt_MechanismEMGLMMixed", (DL_FUNC) &_SelvarMixExt_MechanismEMGLMMixed, 7},
+    {"_SelvarMixExt_EMGaussianMixed", (DL_FUNC) &_SelvarMixExt_EMGaussianMixed, 9},
+    {"_SelvarMixExt_rcppSelectS", (DL_FUNC) &_SelvarMixExt_rcppSelectS, 9},
+    {"_SelvarMixExt_rcppSelectW", (DL_FUNC) &_SelvarMixExt_rcppSelectW, 4},
+    {"_SelvarMixExt_rcppSelectR", (DL_FUNC) &_SelvarMixExt_rcppSelectR, 4},
+    {"_SelvarMixExt_rcppCrit", (DL_FUNC) &_SelvarMixExt_rcppCrit, 4},
     {NULL, NULL, 0}
 };
 
-RcppExport void R_init_SelvarMix(DllInfo *dll) {
+RcppExport void R_init_SelvarMixExt(DllInfo *dll) {
     R_registerRoutines(dll, NULL, CallEntries, NULL, NULL);
     R_useDynamicSymbols(dll, FALSE);
 }

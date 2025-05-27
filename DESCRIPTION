@@ -18,3 +18,4 @@ Remotes: udellgroup/gcimputeR
 Suggests: gcimputeR
 LinkingTo: Rcpp, RcppArmadillo
 NeedsCompilation: yes
+RoxygenNote: 7.3.2
