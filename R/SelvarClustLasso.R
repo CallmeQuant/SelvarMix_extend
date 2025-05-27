@@ -215,7 +215,7 @@ if (scale_data == FALSE && check_scale_data(x, sd_ratio_threshold,
     finalModel <- bestModel[[i]]
     number_clusters <- finalModel$nbcluster
     if (use_missing_pattern) {
-      cat("Fitting final model for criterion", model_name, "\n")
+      cat("Fitting MNARz for criterion", model_name, "\n")
       if (!exists("EMClustMNARz")) stop("EMClustMNARz function is missing")
       em_call <- c(list(x = x_scaled, K = number_clusters,
                         criterion = model_name), mnarz_control)

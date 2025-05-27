@@ -17,7 +17,7 @@ SortvarClust <- function(x,
                          scale = FALSE,
                          ...)
 {
-  # --- Input Checks ---
+  #  Input Checks 
   if(missing(x)){ stop("x is missing !") }
   if(!is.matrix(x) && !is.data.frame(x)) stop(sQuote("x"), " must be a matrix or data frame")
   x <- data.matrix(x) 
@@ -49,23 +49,19 @@ SortvarClust <- function(x,
       error = function(e) stop("Invalid 'initialize'. Choose from 'kmeans', 'hc'.")
   )
 
-
-  # Add checks for other new parameters if needed
-
-  # --- Scaling ---
+  # Scaling 
   if (scale){
     x <- scale(x, center = TRUE, scale = TRUE) # Scale data once
   }
-  # Check if scaling produced NaNs (e.g., constant columns)
   if (any(!is.finite(x))) {
       stop("Scaling resulted in non-finite values. Check for constant columns in the input data.")
   }
   p <- as.integer(ncol(x))
 
-  # --- Variable Ranking ---
+  # Variable Ranking 
   OrderVariable <- matrix(NA, nrow = length(nbcluster), ncol = p)
   rownames(OrderVariable) <- paste("K", nbcluster, sep="=")
-  colnames(OrderVariable) <- colnames(x) # Assign variable names if available
+  colnames(OrderVariable) <- colnames(x) 
 
   if(tolower(type) == "lasso")
   {
@@ -92,12 +88,10 @@ SortvarClust <- function(x,
         stop("ClusteringEMGlassoWeighted did not return a valid 3D array.")
     }
 
-    # Calculate scores and rank
+    # Compute scores and rank
     MatrixScores <- matrix(0, nrow = length(nbcluster), ncol = p)
     for (k_idx in 1:length(nbcluster)) {
-      # Sum scores across the lambda/rho grid for this K
-      MatrixScores[k_idx, ] <- colSums(VarRole[, , k_idx], na.rm = TRUE) # Sum scores, treating NA as 0
-      # Get the order of variables based on scores (highest score first)
+      MatrixScores[k_idx, ] <- colSums(VarRole[, , k_idx], na.rm = TRUE)
       OrderVariable[k_idx, ] <- order(MatrixScores[k_idx, ], decreasing = TRUE)
     }
 
@@ -109,7 +103,7 @@ SortvarClust <- function(x,
       stop("Invalid 'type' specified. Currently only 'lasso' is supported.")
   }
 
-  return(OrderVariable) # Return matrix of ranked variable indices
+  return(OrderVariable)
 }
 
 is.wholenumber <- function(x, tol = .Machine$double.eps^0.5) abs(x - round(x)) < tol

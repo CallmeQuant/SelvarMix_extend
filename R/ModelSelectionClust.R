@@ -7,8 +7,6 @@ ModelSelectionClust <- function(VariableSelectRes,
   mylist.size <- length(VariableSelectRes)
   if (mylist.size == 1) {
     junk <- try(rcppCrit(data, VariableSelectRes[[1]], rmodel, imodel), silent = TRUE)
-    # junk <- list(junk)
-    # if (inherits(junk, "try-error")) stop("Model evaluation failed")
   } else {
     wrapper.rcppCrit <- function(idx) {
       mylist <- VariableSelectRes[[idx]]
