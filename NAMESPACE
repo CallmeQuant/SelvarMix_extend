@@ -9,7 +9,7 @@ importFrom("Rcpp", evalCpp)
 importFrom("glasso", glasso)
 importFrom("glassoFast", glassoFast)
 importFrom("Rmixmod", mixmodCluster, mixmodLearn, mixmodGaussianModel, mixmodPredict, is.wholenumber, mixmodStrategy)
-importFrom("MixAll", clusterDiagGaussian, ClusterStrategy, missingValues)
+importFrom("MixAll", clusterDiagGaussian, missingValues)
 importFrom("mclust", Mclust, hc)
 importFrom("parallel", mclapply, parLapply, clusterApply, makeCluster,  clusterExport,  detectCores,  stopCluster, parApply, clusterEvalQ)
 
