@@ -1,0 +1,20 @@
+Package: SelvarMixExt
+Type: Package
+Title: Extended Regularization for Variable Selection in Model-Based Clustering and Discriminant Analysis
+Version: 1.3.0
+Date: 2025-05-27
+Author: Binh H. Ho, Long Nguyen Chi, TrungTin Nguyen, Binh T. Nguyen, Van Ha Hoang, Christopher Drovandi
+Maintainer: Binh H. Ho <binhho660@gmail.com>
+Description: Extended version of SelvarMix package by Mohammed Sedki, Gilles Celeux, 
+    and Cathy Maugis-Rabusseau. Performs regularization approach to variable selection 
+    in model-based clustering with additional extensions. The package is largely based on the original SelvarMix package, 
+    written and maintained by Mohammed Sedki <mohammed.sedki@u-psud.fr>
+    Original methods based on Maugis, Celeux, and Martin-Magniette (2009, 2011) and Celeux et al. (2019).
+    <doi:10.1016/j.csda.2009.04.013>, <doi:10.1016/j.jmva.2011.05.004>, <doi:10.1007/s11634-018-0322-5>.
+License: GPL (>= 3)
+Depends: R (>= 3.1.0), glasso, glassoFast, Rmixmod, mclust, MixAll, parallel, base
+Imports: Rcpp (>= 0.11.1), methods
+Remotes: udellgroup/gcimputeR
+Suggests: gcimputeR
+LinkingTo: Rcpp, RcppArmadillo
+NeedsCompilation: yes
