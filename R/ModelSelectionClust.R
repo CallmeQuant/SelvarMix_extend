@@ -14,8 +14,7 @@ ModelSelectionClust <- function(VariableSelectRes,
       return(res)
     }
     
-    if (mylist.size < nbcores) 
-      nbcores <- mylist.size
+    if (mylist.size < nbcores) {nbcores <- mylist.size}
     
     if (.Platform$OS.type == "windows") {
       cl <- makeCluster(nbcores)

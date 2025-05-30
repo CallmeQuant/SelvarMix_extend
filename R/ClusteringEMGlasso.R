@@ -149,13 +149,14 @@ ClusteringEMGlassoWeighted <- function(data,
                                    colnames(data),
                                    paste("K", nbcluster)))
 
-  #  Main Loop over K 
+  #  Loop over K 
   for (k_idx in 1:length(nbcluster)) {
     K_current <- nbcluster[k_idx]
     message(sprintf("Processing K = %d...", K_current))
 
     # Get initial parameters list for this K
     P_init <- junk_list[[k_idx]]
+
     # Validate the structure returned by InitParameter
     if (!is.list(P_init) || length(P_init) != 5 ||
         !is.numeric(P_init[[1]]) || !is.matrix(P_init[[2]]) || !is.array(P_init[[3]]) ||
@@ -171,7 +172,7 @@ ClusteringEMGlassoWeighted <- function(data,
     }
 
 
-    #  Calculate Pk_cube (once per K) 
+    #  Compute Pk_cube (once per K) 
     message(sprintf("Calculating Pk cube for K = %d using method: %s...", K_current, group_shrinkage_method))
     initial_omega_0 <- P_init[[4]]
 
@@ -183,65 +184,6 @@ ClusteringEMGlassoWeighted <- function(data,
                           laplacian_norm_type_pk= laplacian_norm_type,
                           eps_w0                = epsilon_weighted_by_W0,
                           penalize_diag_pk      = penalize_diag)
-
-    # Pk_cube <- compute_Pk(initial_omega_0,
-    #                         method        = group_shrinkage_method,
-    #                         distance_method = distance_method,
-    #                         eps_w0          = epsilon_weighted_by_W0,
-    #                         penalize_diag   = penalize_diag)
-
-    # # Robustly calculate Pk_cube (similar logic to previous response)
-    # Pk_cube <- tryCatch({
-    #   # Check if initial_omega_0 is valid before using it
-    #   if(is.null(initial_omega_0) || !is.array(initial_omega_0) || any(!is.finite(initial_omega_0))) {
-    #       stop("Initial Omega_0 from InitParameter is invalid.") # Stop if init Omega is bad
-    #   }
-    #   switch (
-    #     group_shrinkage_method,
-    #     "common" = array(1, dim = c(p, p, K_current)),
-    #     "weighted_by_W0" = {
-    #         Pk_temp <- 1 / (epsilon_weighted_by_W0 + abs(initial_omega_0))
-    #         Pk_temp[!is.finite(Pk_temp)] <- 1 # Handle potential Inf/NaN
-    #         Pk_temp
-    #     },
-    #     "weighted_by_dist_to_I" = {
-    #         dist_vals <- apply(initial_omega_0, 3, function(omega) {
-    #             omega[!is.finite(omega)] <- 0
-    #             omega <- omega + diag(epsilon_weighted_by_W0, p)
-    #             if (!matrixcalc::is.positive.definite(omega, tol=epsilon_weighted_by_W0)) return(1) # Default dist
-    #             res <- try(shapes::distcov(S1 = omega, S2 = diag(p), method = distance_method), silent=TRUE)
-    #             if (inherits(res, "try-error")) return(1) # Default dist
-    #             return(res)
-    #         })
-    #         dist_vals[dist_vals < epsilon_weighted_by_W0] <- epsilon_weighted_by_W0
-    #         1 / array(rep(dist_vals, each = p ^ 2), dim = c(p, p, K_current))
-    #     },
-    #     "weighted_by_dist_to_diag_W0" = {
-    #          dist_vals <- apply(initial_omega_0, 3, function(omega) {
-    #             omega[!is.finite(omega)] <- 0
-    #             omega <- omega + diag(epsilon_weighted_by_W0, p)
-    #              if (!matrixcalc::is.positive.definite(omega, tol=epsilon_weighted_by_W0)) return(1)
-    #             diag_omega <- diag(diag(omega))
-    #             diag_omega[diag_omega <= epsilon_weighted_by_W0] <- epsilon_weighted_by_W0
-    #             res <- try(shapes::distcov(S1 = omega, S2 = diag_omega, method = distance_method), silent=TRUE)
-    #              if (inherits(res, "try-error")) return(1)
-    #              return(res)
-    #         })
-    #         dist_vals[dist_vals < epsilon_weighted_by_W0] <- epsilon_weighted_by_W0
-    #         1 / array(rep(dist_vals, each = p ^ 2), dim = c(p, p, K_current))
-    #     }
-    #   ) # end switch
-    # }, error = function(e) {
-    #     warning("Error calculating Pk_cube for K=", K_current, ": ", e$message, ". Defaulting to 'common'.")
-    #     array(1, dim = c(p, p, K_current)) # Default to common if error
-    # })
-
-    # # Ensure Pk diagonal is zero if not penalizing diagonal
-    # if (!penalize_diag) {
-    #   for (k_inner in 1:K_current) { diag(Pk_cube[, , k_inner]) <- 0 }
-    # }
-    # Pk_cube[!is.finite(Pk_cube)] <- 1.0 # Ensure finite weights
-
     message("  Pk cube calculation complete.")
 
 
@@ -282,7 +224,7 @@ ClusteringEMGlassoWeighted <- function(data,
     parallel.varrole_k <- list() # Results for the current K
 
     if (nbcores > 1 && is_windows) {
-      #  Windows Parallel (parApply) 
+      #  Windows Parallel
       clusterExport(cl = cl,
                     varlist = c("InputList_rcpp", "Pk_cube", "p", "K_current", "rcppClusteringEMGlassoWeighted"),
                     envir = environment())
@@ -302,7 +244,7 @@ ClusteringEMGlassoWeighted <- function(data,
           parallel.varrole_k <- t(parallel.varrole_k_matrix)
       } else {
           warning("parApply did not return a matrix[p, n_grid]. Results might be inconsistent.")
-          # Coerce/fill with NA
+          # Coerce with NA
           results_mat <- matrix(NA_integer_, nrow=nrow(pen.grid), ncol=p)
           if(is.list(parallel.varrole_k_matrix) && length(parallel.varrole_k_matrix) == nrow(pen.grid)) {
               for(i in 1:length(parallel.varrole_k_matrix)) {
@@ -347,7 +289,7 @@ ClusteringEMGlassoWeighted <- function(data,
 
     # Store results, handling NAs
     var.role.k <- parallel.varrole_k
-    var.role.k[is.na(var.role.k)] <- 0 # Replace NAs (from errors) with 0 score
+    var.role.k[is.na(var.role.k)] <- 0
     if(nrow(var.role.k) == nrow(VarRole[,,k_idx]) && ncol(var.role.k) == ncol(VarRole[,,k_idx])) {
         VarRole[, , k_idx] <- var.role.k
     } else {

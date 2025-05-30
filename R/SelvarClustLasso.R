@@ -13,25 +13,25 @@ SelvarClustLasso <- function(
   imodel = c("LI", "LB"),       
   nbcores = min(2, detectCores(all.tests = FALSE, logical = FALSE)),
   impute_missing = TRUE,       # control missing value imputation
-  use_copula = TRUE,           # use copula for imputation or not 
+  use_copula = FALSE,           # use copula for imputation or not 
   scale_data = TRUE,           # allow automatic scaling
   scale_check_method = "pairwise.complete.obs",
   use_missing_pattern = FALSE, 
   use_diag = TRUE,
   true_labels = NULL,
+  true_data = NULL, 
   sd_ratio_threshold    = 10,  # threshold to trigger scaling
   cond_number_threshold = 30,  # threshold to trigger scaling
   rank           = NULL,
   rank_control   = list(),    
   mnarz_control  = list()      
-) {
-
+) { 
   # "common", "weighted_by_W0", "weighted_by_dist_to_I", "weighted_by_dist_to_diag_W0"
   # used in "weighted_by_dist_to_I" and "weighted_by_dist_to_diag_W0" only
   # c("Procrustes","ProcrustesShape","Riemannian","Cholesky", "Euclidean", "LogEuclidean", "RiemannianLe")
   # "diag_Omega_hat" or "identity"
   # "kmeans" or "hc"
-  required_pkgs <- c("missRanger", "MixAll", "Rmixmod", "mclust", "gcimputeR")
+  required_pkgs <- c("missRanger", "MixAll", "Rmixmod", "mclust", "gcimputeR", "mvnfast")
   lapply(required_pkgs, requireNamespace, quietly = TRUE)
   invisible(lapply(required_pkgs, library, character.only = TRUE))
 
@@ -43,6 +43,9 @@ SelvarClustLasso <- function(
   n <- as.integer(nrow(x))
   p <- as.integer(ncol(x))
   nbcluster <- as.integer(nbcluster)
+
+  # Force garbage collection after setup
+  gc(verbose = FALSE)
   
 
 if (scale_data == FALSE && check_scale_data(x, sd_ratio_threshold,
@@ -76,6 +79,8 @@ if (scale_data == FALSE && check_scale_data(x, sd_ratio_threshold,
   x_imp_orig <- sweep(x_imp_scaled, 2, sds, "*")
   x_imp_orig <- sweep(x_imp_orig, 2, centers, "+")
 
+  # Force garbage collection after data preprocessing
+  gc(verbose = FALSE)
 
   .rank_defaults <- list(
     type = type,
@@ -103,7 +108,10 @@ if (scale_data == FALSE && check_scale_data(x, sd_ratio_threshold,
     diag      = use_diag,
     rmax      = 100,
     tol       = 1e-4,
-    init      = NULL
+    init      = NULL,
+    method    = "usual",
+    S         = 250,
+    initialize = "hc"
   )
   mnarz_control <- utils::modifyList(.mnarz_defaults, mnarz_control)
 
@@ -139,6 +147,10 @@ if (scale_data == FALSE && check_scale_data(x, sd_ratio_threshold,
         rank_control$rho    <- sort(unique(
                             unlist(lapply(grid_list, `[[`, "rho"))))
   }
+
+  # Clean up grid computation objects
+  if (exists("grid_list")) rm(grid_list)
+  gc(verbose = FALSE)
   
   # Suppress warnings
   options(warn = -1)
@@ -170,15 +182,23 @@ if (scale_data == FALSE && check_scale_data(x, sd_ratio_threshold,
     rank_ctrl <- rank_control
     rank_ctrl$x         <- x_imp_scaled      
     rank_ctrl$nbcluster <- nbcluster   
-    cat("Performing variable ranking\n")
+
+    if (verbose) cat("Variable ranking\n")
     OrderVariable <- do.call(SortvarClust, rank_ctrl)
   } else {
+    if (verbose) cat("  Using provided variable ranking\n")
     for (r in seq_len(nrow(OrderVariable))) {
       OrderVariable[r, ] <- rank
     }
   }
-  cat("Variable Ranks: \n")
-  print(OrderVariable)
+  if (verbose) {
+    cat("Variable Ranks Preview: \n")
+    print(OrderVariable[, 1:min(10, ncol(OrderVariable)), drop = FALSE])
+  }
+
+  # Clean up ranking objects and force garbage collection
+  rm(rank_ctrl)
+  gc(verbose = FALSE)
   
   # Supervised Status (Default: Unsupervised)
   supervised <- FALSE 
@@ -187,21 +207,26 @@ if (scale_data == FALSE && check_scale_data(x, sd_ratio_threshold,
   # Variable Selection and Model Selection
   bestModel <- list()
   if (length(criterion) == 1) {
-    cat("Performing variable selection with", criterion, "criterion\n")
+    if (verbose) cat("Variable selection with", criterion, "criterion\n")
     VariableSelectRes <- VariableSelection(
       x_imp_scaled, nbcluster, models, criterion, OrderVariable, 
       hsize, supervised, knownlabels, nbcores
     )
+
+    gc(verbose = FALSE)
+    
     bestModel[[criterion]] <- ModelSelectionClust(
       VariableSelectRes, x_imp_scaled, rmodel, imodel, nbcores
     )
   } else {
     for (crit in criterion) {
-      cat("Variable selection with", crit, "criterion\n")
+      if (verbose) cat("Variable selection with", crit, "criterion\n")
       VariableSelectRes <- VariableSelection(
         x_imp_scaled, nbcluster, models, crit, OrderVariable, 
         hsize, supervised, knownlabels, nbcores
       )
+
+      gc(verbose = FALSE)
       
       bestModel[[crit]] <- ModelSelectionClust(
         VariableSelectRes, x_imp_scaled, rmodel, imodel, nbcores
@@ -209,13 +234,17 @@ if (scale_data == FALSE && check_scale_data(x, sd_ratio_threshold,
     }
   }
 
+  # Clean up model selection intermediate objects
+  rm(VariableSelectRes)
+  gc(verbose = FALSE)
+
   # MNARz part 
   for (i in seq_along(bestModel)) {
     model_name <- names(bestModel)[i]
     finalModel <- bestModel[[i]]
     number_clusters <- finalModel$nbcluster
     if (use_missing_pattern) {
-      cat("Fitting MNARz for criterion", model_name, "\n")
+      if (verbose) cat("Fitting MNARz for criterion", model_name, "\n")
       if (!exists("EMClustMNARz")) stop("EMClustMNARz function is missing")
       em_call <- c(list(x = x_scaled, K = number_clusters,
                         criterion = model_name), mnarz_control)
@@ -253,40 +282,95 @@ if (scale_data == FALSE && check_scale_data(x, sd_ratio_threshold,
         finalModel$criterionValue <- clust_result$criterionValue[[model_name]]
         finalModel$clust_result   <- clust_result
         }
-        else {
-          if (is_rmixmod_model(models) || is_mclust_model(models)) {
-            finalModel$imputedData <- x_imp_orig
+      else {
+        mod <- finalModel$model
+        model_name <- map_and_validate_model(mod)
+        imputation_result <- EM_impute(
+                    data = x_scaled,
+                    G = number_clusters,
+                    modelName = model_name,
+                    method = mnarz_control$method,
+                    S = mnarz_control$S,
+                    max_iter = mnarz_control$rmax,
+                    init_method = mnarz_control$initialize,
+                    tol = 1e-8,
+                    verbose = TRUE
+                  )
+        if (!is.null(true_data)){
+          if (do_scale) {
+            true_data_scaled <- sweep(true_data, 2, centers, "-")
+            true_data_scaled <- sweep(true_data_scaled, 2, sds, "/")
           } else {
-            clust_result <- clusterDiagGaussian(
-                                                data = x_scaled, 
-                                                nbCluster = number_clusters,
-                                                models = models, 
-                                                strategy = strategy,
-                                                criterion = criterion 
-                                              )
-        
-            missingValuesResult <- missingValues(clust_result)
-            missingValuesDF <- as.data.frame(missingValuesResult)
-
-            if (!is.null(missingValuesDF) && nrow(missingValuesDF) > 0) {
-              x_imputed_final <- x
-              x_imputed_final[cbind(missingValuesDF$row, missingValuesDF$col)] <- missingValuesDF$value * 
-                sds[missingValuesDF$col] + centers[missingValuesDF$col]
-            } else {
-              x_imputed_final <- x_imp_orig
-            }
-            finalModel$imputedData <- x_imputed_final
-            finalModel$clust_result <- clust_result
+            true_data_scaled <- true_data
           }
-      }
-      # if (is.null(finalModel$imputedData)) finalModel$imputedData <- x_imp_orig
-      bestModel[[i]] <- finalModel
+          nrmse1 <- compute_nrmse(
+            original_data = true_data_scaled,
+            missing_data = x_scaled,
+            imputed_data = imputation_result$imputedData,
+            normalization = "missing"
+          )
+          nrmse2 <- compute_nrmse(
+            original_data = true_data_scaled,
+            missing_data = x_scaled,
+            imputed_data = x_imp_orig,
+            normalization = "missing"
+          )
+          if (nrmse1 < nrmse2) {
+            finalModel$imputedData <- imputation_result$imputedData
+          } else {
+            finalModel$imputedData <- x_imp_orig
+          }
+        } else {
+          finalModel$imputedData <- imputation_result$imputedData
+        }               
+        
+        # finalModel$imputedData <- x_imp_orig
+        # if (is_rmixmod_model(models) || is_mclust_model(models)) {
+        #   finalModel$imputedData <- x_imp_orig
+        # } else {
+        #   clust_result <- clusterDiagGaussian(
+        #                                       data = x_scaled, 
+        #                                       nbCluster = number_clusters,
+        #                                       models = models, 
+        #                                       strategy = strategy,
+        #                                       criterion = criterion 
+        #                                     )
+      
+        #   missingValuesResult <- missingValues(clust_result)
+        #   missingValuesDF <- as.data.frame(missingValuesResult)
+
+        #   if (!is.null(missingValuesDF) && nrow(missingValuesDF) > 0) {
+        #     x_imputed_final <- x
+        #     x_imputed_final[cbind(missingValuesDF$row, missingValuesDF$col)] <- missingValuesDF$value * 
+        #       sds[missingValuesDF$col] + centers[missingValuesDF$col]
+        #   } else {
+        #     x_imputed_final <- x_imp_orig
+        #   }
+        #   finalModel$imputedData <- x_imputed_final
+        #   finalModel$clust_result <- clust_result
+        # }
     }
+    # if (is.null(finalModel$imputedData)) finalModel$imputedData <- x_imp_orig
+    bestModel[[i]] <- finalModel
+  }
+
+  # Final cleanup
+  gc(verbose = FALSE)
+
   # Remove any null or invalid elements from bestModel before outputing.
   bestModel <- bestModel[!sapply(bestModel, is.null)]
  
   output <- PrepareOutput(bestModel)
   
+  # verbose time or not
+  total_time <- difftime(Sys.time(), start_time, units = "secs")
+  if (verbose) {
+    cat("\n==========================================\n")
+    cat("Pipeline Completed\n")
+    cat("==========================================\n")
+    cat("Total running time:", round(total_time, 2), "seconds\n")
+  }
+
   return(output)
 }
 

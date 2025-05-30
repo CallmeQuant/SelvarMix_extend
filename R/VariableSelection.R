@@ -89,7 +89,7 @@ VariableSelection <- function(data,
       ordervar = if (is.matrix(OrderVariable) && nrow(OrderVariable) >= length(nbcluster)) OrderVariable[i, ] else if (is.matrix(OrderVariable)) OrderVariable[1, ] else OrderVariable
     )
   })
-  # --- Parallel Execution ---
+  # Parallel Execution 
   results <- list()
 
   # if (nbcores > 1 && length(input_list) > 1) {
@@ -155,7 +155,7 @@ VariableSelection <- function(data,
   }
 
 
-  # --- Sequential Execution---
+  #  Sequential Execution
   if (nbcores <= 1) {
     cat("Running sequentially...\n")
     results <- lapply(input_list, function(x) {
@@ -167,7 +167,7 @@ VariableSelection <- function(data,
     })
   }
 
-  # --- Process Results ---
+  #  Process Results 
   VariableSelectRes <- list()
   valid_results_count <- 0
 
@@ -215,100 +215,3 @@ VariableSelection <- function(data,
 
   return(VariableSelectRes)
 }
-
-
-
-
-#   if (framework == "Mclust"){
-#     # cat("Using sequential processing for MClust.\n")
-#     # results <- lapply(input_list, function(x) {
-#     #                   tryCatch(
-#     #                     wrapper.selectVar(x$nbcluster, x$ordervar),
-#     #                     error = function(e) list(error = paste("Error in wrapper.selectVar:", e$message))
-#     #                   )
-#     #                 })
-#     results <- lapply(input_list, function(x) {
-#                     wrapper.selectVar(x$nbcluster, x$ordervar)
-#                 })
-#   } else { 
-#     junk <- tryCatch({
-#       # cat("Using parallel processing with", nbcores, "cores.\n")
-#       if (.Platform$OS.type == "windows") {
-#         cl <- makeCluster(nbcores)
-#         common.objects <- c("data", "model_name", "framework", "hsize", "criterion", "supervised", "z", 
-#                         "rcppSelectS", "rcppSelectW")
-#         clusterExport(cl, varlist = common.objects, envir = environment())
-        
-#         clusterEvalQ(cl, {
-#           library(MixAll)
-#           library(Rmixmod)
-#           library(mclust)
-#         })
-        
-#         results <- parLapply(cl, input_list, function(x) {
-#           tryCatch(
-#             wrapper.selectVar(x$nbcluster, x$ordervar),
-#             error = function(e) {
-#               list(error = paste("Error in wrapper.selectVar:", e$message))
-#             }
-#           )
-#         })
-        
-#         stopCluster(cl)
-#         results
-#       } else {
-#         mclapply(
-#           X = input_list,
-#           FUN = function(x) {
-#             tryCatch(
-#               wrapper.selectVar(x$nbcluster, x$ordervar),
-#               error = function(e) {
-#                 list(error = paste("Error in wrapper.selectVar:", e$message))
-#               }
-#             )
-#           },
-#           mc.cores = nbcores,
-#           mc.silent = FALSE,
-#           mc.preschedule = TRUE,
-#           mc.cleanup = TRUE
-#         )
-#       }
-#     }, error = function(e) {
-#       cat("Error in parallel processing:", e$message, "\n")
-#       list(list(error = paste("Error in parallel processing:", e$message)))
-#     })
-#   }
-  
-#   # Initialize the result list
-#   VariableSelectRes <- list()
-#   idx <- 1
-    
-#   # Iterate over results
-#   for (ll in seq_along(results)) {
-#     if (!is.null(results[[ll]]$error)) {
-#       cat("Error in run", ll, ":", results[[ll]]$error, "\n")
-#       next
-#     }
-#     VariableSelectRes[[idx]] <- list(
-#       S = results[[ll]]$S,
-#       W = results[[ll]]$W,
-#       U = results[[ll]]$U,
-#       criterionValue = if (!is.null(results[[ll]]$criterionValue)) results[[ll]]$criterionValue else NA_real_,
-#       criterion = if (!is.null(results[[ll]]$criterion)) results[[ll]]$criterion else criterion,
-#       model = if (!is.null(results[[ll]]$model)) results[[ll]]$model else model_name,
-#       nbcluster = if (!is.null(results[[ll]]$nbcluster)) results[[ll]]$nbcluster else input_list[[ll]]$nbcluster,
-#       parameters = results[[ll]]$parameters,
-#       partition = results[[ll]]$partition,
-#       proba = results[[ll]]$proba,
-#       missingValues = results[[ll]]$missingValues
-#     )
-#     idx <- idx + 1
-#   }
-  
-#   # Check if all results failed
-#   if (length(VariableSelectRes) == 0) {
-#     cat("No successful results. All model fittings failed.\n")
-#     stop("All model fittings failed. Please check your data and parameters.")
-#   }
-#   return(VariableSelectRes)
-# }
