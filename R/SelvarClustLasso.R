@@ -286,11 +286,13 @@ if (scale_data == FALSE && check_scale_data(x, sd_ratio_threshold,
       else {
         if (is_rmixmod_model(models)){
           mod <- extract_rmixmod_model(models)
+          cat("Rmixmod model: ", mod, "\n")
         }
         else{
           mod <- finalModel$model
         }
         model_name <- map_and_validate_model(mod)
+        cat("Using model: ", model_name, "\n")
         imputation_result <- EM_impute(
                     data = x_scaled,
                     G = number_clusters,
@@ -321,6 +323,8 @@ if (scale_data == FALSE && check_scale_data(x, sd_ratio_threshold,
             imputed_data = x_imp_orig,
             normalization = "missing"
           )
+          cat("NRMSE for imputed data:", nrmse1, "\n")
+          cat("NRMSE for original imputed data:", nrmse2, "\n")
           if (nrmse1 < nrmse2) {
             finalModel$imputedData <- imputation_result$imputedData
           } else {
