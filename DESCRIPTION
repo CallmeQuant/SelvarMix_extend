@@ -15,7 +15,7 @@ License: GPL (>= 3)
 Encoding: UTF-8
 Depends: R (>= 3.5.0), glasso, glassoFast, Rmixmod, mclust, MixAll, parallel, base, mvnfast
 Imports: Rcpp (>= 0.11.1), methods
-Remotes: udellgroup/gcimputeRt
+Remotes: udellgroup/gcimputeR
 Suggests: gcimputeR
 LinkingTo: Rcpp, RcppArmadillo
 NeedsCompilation: yes
