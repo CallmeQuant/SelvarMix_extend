@@ -24,7 +24,8 @@ SelvarClustLasso <- function(
   cond_number_threshold = 30,  # threshold to trigger scaling
   rank           = NULL,
   rank_control   = list(),    
-  mnarz_control  = list()      
+  mnarz_control  = list(),
+  verbose = TRUE      
 ) { 
   # "common", "weighted_by_W0", "weighted_by_dist_to_I", "weighted_by_dist_to_diag_W0"
   # used in "weighted_by_dist_to_I" and "weighted_by_dist_to_diag_W0" only
@@ -283,7 +284,12 @@ if (scale_data == FALSE && check_scale_data(x, sd_ratio_threshold,
         finalModel$clust_result   <- clust_result
         }
       else {
-        mod <- finalModel$model
+        if (is_rmixmod_model(models)){
+          mod <- extract_rmixmod_model(models)
+        }
+        else{
+          mod <- finalModel$model
+        }
         model_name <- map_and_validate_model(mod)
         imputation_result <- EM_impute(
                     data = x_scaled,
@@ -294,7 +300,7 @@ if (scale_data == FALSE && check_scale_data(x, sd_ratio_threshold,
                     max_iter = mnarz_control$rmax,
                     init_method = mnarz_control$initialize,
                     tol = 1e-8,
-                    verbose = TRUE
+                    verbose = FALSE
                   )
         if (!is.null(true_data)){
           if (do_scale) {

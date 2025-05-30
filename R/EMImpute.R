@@ -766,7 +766,6 @@ map_mixall_to_mclust <- function(mixall_model) {
 
 
 map_rmixmod_to_mclust <- function(rmixmod_model) {
-  
   # Rmixmod to mclust mapping
   rmixmod_to_mclust_map <- list(
     "Gaussian_p_L_I"        = "EII", 
@@ -820,6 +819,66 @@ map_rmixmod_to_mclust <- function(rmixmod_model) {
                 "- using VVV as default"))
   return("VVV")
 } 
+
+extract_rmixmod_model <- function(model_string) {
+  if (grepl("mixmodGaussianModel", model_string)) {
+    
+    listmodels_pattern <- 'listModels\\s*=\\s*c\\s*\\(\\s*"([^"]+)"'
+    listmodels_match <- regmatches(model_string, 
+                                   regexpr(listmodels_pattern, model_string, perl = TRUE))
+    
+    if (length(listmodels_match) > 0) {
+      model_name <- gsub(listmodels_pattern, '\\1', listmodels_match, perl = TRUE)
+      return(model_name)
+    }
+    
+    family_match <- regmatches(model_string, 
+                               regexpr('family\\s*=\\s*"([^"]+)"', model_string, perl = TRUE))
+    
+    if (length(family_match) > 0) {
+      family <- gsub('family\\s*=\\s*"([^"]+)"', '\\1', family_match, perl = TRUE)
+      
+      family_to_rmixmod <- list(
+        "spherical" = "Gaussian_pk_L_I",
+        "diagonal" = "Gaussian_pk_Lk_C", 
+        "general" = "Gaussian_pk_Lk_Dk_Ak_Dk",
+        "gaussian_pk_l_i" = "Gaussian_pk_L_I",
+        "gaussian_pk_lk_c" = "Gaussian_pk_Lk_C",
+        "gaussian_pk_lk_dk_ak_dk" = "Gaussian_pk_Lk_Dk_Ak_Dk"
+      )
+      
+      family_lower <- tolower(family)
+      
+      if (family_lower %in% names(family_to_rmixmod)) {
+        return(family_to_rmixmod[[family_lower]])
+      } else {
+        # If it's already in Rmixmod format, return as is (with proper casing)
+        if (grepl("^gaussian_p[k]?_l[k]?_", family_lower)) {
+          # Convert to proper Rmixmod format
+          parts <- strsplit(family_lower, "_")[[1]]
+          proper_case <- paste(
+            "Gaussian",
+            ifelse(parts[2] == "pk", "pk", "p"),
+            paste(toupper(substring(parts[3:length(parts)], 1, 1)), 
+                  substring(parts[3:length(parts)], 2), 
+                  sep = "", collapse = "_"),
+            sep = "_"
+          )
+          return(proper_case)
+        }
+        
+        warning(paste("Unknown family:", family, "- using default Gaussian_pk_Lk_C"))
+        return("Gaussian_pk_Lk_C")
+      }
+    }
+  }
+  if (grepl("^Gaussian_p[k]?_", model_string)) {
+    return(model_string)
+  }
+  
+  warning(paste("Could not parse model string:", model_string, "- using default"))
+  return("Gaussian_pk_Lk_C")
+}
 
 map_to_mclust <- function(model_name, package_source = NULL) {
   if (is.null(package_source)) {
