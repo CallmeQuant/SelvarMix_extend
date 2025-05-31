@@ -321,7 +321,7 @@ if (scale_data == FALSE && check_scale_data(x, sd_ratio_threshold,
                 nrmse1 <- compute_nrmse(
                     original_data = true_data_scaled,
                     missing_data = x_scaled,
-                    imputed_data = imputation_result$imputedData,
+                    imputed_data = imputation_result$imputed_data,
                     normalization = "missing"
                 )
                 nrmse2 <- compute_nrmse(
@@ -331,7 +331,7 @@ if (scale_data == FALSE && check_scale_data(x, sd_ratio_threshold,
                     normalization = "missing"
                 )
                 if (nrmse1 < nrmse2) {
-                  finalModel$imputedData <- imputation_result$imputedData
+                  finalModel$imputedData <- imputation_result$imputed_data
                 } else {
                   finalModel$imputedData <- x_imp_orig
                 }
