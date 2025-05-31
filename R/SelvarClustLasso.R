@@ -291,10 +291,10 @@ if (scale_data == FALSE && check_scale_data(x, sd_ratio_threshold,
           mod <- finalModel$model
         }
         model_name <- map_and_validate_model(mod)
-        cat("Using model: ", model_name, "\n")
+        x_scaled_imp <- x_scaled 
         imputation_result <- tryCatch({
                                       EM_impute(
-                                          data = x_scaled,
+                                          data = x_scaled_imp,
                                           G = number_clusters,
                                           modelName = model_name,
                                           method = mnarz_control$method,
@@ -306,7 +306,6 @@ if (scale_data == FALSE && check_scale_data(x, sd_ratio_threshold,
                                       )
         }, error = function(e) {
             cat("Error in EM_impute:", e$message, "\n")
-            cat("Using original imputation method instead.\n")
             return(NULL)
         })
         if (is.null(imputation_result)) {
@@ -346,6 +345,7 @@ if (scale_data == FALSE && check_scale_data(x, sd_ratio_threshold,
   }
 
   # Final cleanup
+  rm(x_scaled_imp)
   gc(verbose = FALSE)
 
   # Remove any null or invalid elements from bestModel before outputing.
