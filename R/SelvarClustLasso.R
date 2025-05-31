@@ -286,79 +286,60 @@ if (scale_data == FALSE && check_scale_data(x, sd_ratio_threshold,
       else {
         if (is_rmixmod_model(models)){
           mod <- extract_rmixmod_model(models)
-          cat("Rmixmod model: ", mod, "\n")
         }
         else{
           mod <- finalModel$model
         }
         model_name <- map_and_validate_model(mod)
         cat("Using model: ", model_name, "\n")
-        imputation_result <- EM_impute(
-                    data = x_scaled,
-                    G = number_clusters,
-                    modelName = model_name,
-                    method = mnarz_control$method,
-                    S = mnarz_control$S,
-                    max_iter = mnarz_control$rmax,
-                    init_method = mnarz_control$initialize,
-                    tol = 1e-8,
-                    verbose = FALSE
-                  )
-        if (!is.null(true_data)){
-          if (do_scale) {
-            true_data_scaled <- sweep(true_data, 2, centers, "-")
-            true_data_scaled <- sweep(true_data_scaled, 2, sds, "/")
-          } else {
-            true_data_scaled <- true_data
-          }
-          nrmse1 <- compute_nrmse(
-            original_data = true_data_scaled,
-            missing_data = x_scaled,
-            imputed_data = imputation_result$imputedData,
-            normalization = "missing"
-          )
-          nrmse2 <- compute_nrmse(
-            original_data = true_data_scaled,
-            missing_data = x_scaled,
-            imputed_data = x_imp_orig,
-            normalization = "missing"
-          )
-          cat("NRMSE for imputed data:", nrmse1, "\n")
-          cat("NRMSE for original imputed data:", nrmse2, "\n")
-          if (nrmse1 < nrmse2) {
-            finalModel$imputedData <- imputation_result$imputedData
-          } else {
+        imputation_result <- tryCatch({
+                                      EM_impute(
+                                          data = x_scaled,
+                                          G = number_clusters,
+                                          modelName = model_name,
+                                          method = mnarz_control$method,
+                                          S = mnarz_control$S,
+                                          max_iter = mnarz_control$rmax,
+                                          init_method = mnarz_control$initialize,
+                                          tol = 1e-8,
+                                          verbose = FALSE
+                                      )
+        }, error = function(e) {
+            cat("Error in EM_impute:", e$message, "\n")
+            cat("Using original imputation method instead.\n")
+            return(NULL)
+        })
+        if (is.null(imputation_result)) {
             finalModel$imputedData <- x_imp_orig
-          }
         } else {
-          finalModel$imputedData <- imputation_result$imputedData
-        }               
-        
-        # finalModel$imputedData <- x_imp_orig
-        # if (is_rmixmod_model(models) || is_mclust_model(models)) {
-        #   finalModel$imputedData <- x_imp_orig
-        # } else {
-        #   clust_result <- clusterDiagGaussian(
-        #                                       data = x_scaled, 
-        #                                       nbCluster = number_clusters,
-        #                                       models = models, 
-        #                                       strategy = strategy,
-        #                                       criterion = criterion 
-        #                                     )
-      
-        #   missingValuesResult <- missingValues(clust_result)
-        #   missingValuesDF <- as.data.frame(missingValuesResult)
-
-        #   if (!is.null(missingValuesDF) && nrow(missingValuesDF) > 0) {
-        #     x_imputed_final <- x
-        #     x_imputed_final[cbind(missingValuesDF$row, missingValuesDF$col)] <- missingValuesDF$value * 
-        #       sds[missingValuesDF$col] + centers[missingValuesDF$col]
-        #   } else {
-        #     x_imputed_final <- x_imp_orig
-        #   }
-        #   finalModel$imputedData <- x_imputed_final
-        #   finalModel$clust_result <- clust_result
-        # }
+            if (!is.null(true_data)){
+              if (do_scale) {
+                  true_data_scaled <- sweep(true_data, 2, centers, "-")
+                  true_data_scaled <- sweep(true_data_scaled, 2, sds, "/")
+                } else {
+                  true_data_scaled <- true_data
+                }
+                nrmse1 <- compute_nrmse(
+                    original_data = true_data_scaled,
+                    missing_data = x_scaled,
+                    imputed_data = imputation_result$imputedData,
+                    normalization = "missing"
+                )
+                nrmse2 <- compute_nrmse(
+                    original_data = true_data_scaled,
+                    missing_data = x_scaled,
+                    imputed_data = x_imp_orig,
+                    normalization = "missing"
+                )
+                if (nrmse1 < nrmse2) {
+                  finalModel$imputedData <- imputation_result$imputedData
+                } else {
+                  finalModel$imputedData <- x_imp_orig
+                }
+            } else {
+              finalModel$imputedData <- imputation_result$imputedData
+            }
+        }            
     }
     # if (is.null(finalModel$imputedData)) finalModel$imputedData <- x_imp_orig
     bestModel[[i]] <- finalModel

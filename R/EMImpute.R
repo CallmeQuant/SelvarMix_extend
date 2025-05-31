@@ -1,4 +1,3 @@
-# Helper functions from MMCEM2
 PartitionData <- function(data) {
   d <- ncol(data)
   idx <- seq(1:nrow(data))
@@ -122,6 +121,7 @@ Responsibility <- function(split_data, means, covs, pi) {
     # Normalize by row to get responsibilities
     row_sums <- rowSums(dens_eval0)
     gamma0 <- dens_eval0 / row_sums
+    gamma0[is.na(gamma0) | is.nan(gamma0)] <- 1/k 
     
     colnames(dens_eval0) <- colnames(gamma0) <- paste0("k", 1:k)
     rownames(dens_eval0) <- rownames(gamma0) <- 1:n0
@@ -144,6 +144,7 @@ Responsibility <- function(split_data, means, covs, pi) {
     # Normalize by row to get responsibilities
     row_sums <- rowSums(dens_eval1)
     gamma1 <- dens_eval1 / row_sums
+    gamma1[is.na(gamma1) | is.nan(gamma1)] <- 1/k
     
     # Format results
     colnames(dens_eval1) <- colnames(gamma1) <- paste0("k", 1:k)
@@ -585,6 +586,26 @@ conditional_imputation <- function(obs_values, obs_indices, miss_indices, parame
   imputed_values <- numeric(p_miss)
   epsilon_pd <- sqrt(.Machine$double.eps)
   
+  if (any(!is.finite(z_i)) || abs(sum(z_i[is.finite(z_i)]) - 1) > 1e-6 
+      || sum(z_i[is.finite(z_i)]) == 0) {
+    warning("Responsibilities in conditional_imputation are NA, non-finite.")
+    valid_entries <- is.finite(z_i) & z_i >= 0
+    if (sum(z_i[valid_entries]) > 0) {
+        z_i[!valid_entries] <- 0
+        z_i <- z_i / sum(z_i)
+    } else {
+        z_i <- rep(1/G, G)
+    }
+  }
+  
+  if (abs(sum(z_i) - 1) > 1e-6) { 
+      if(sum(z_i) > .Machine$double.eps) { 
+          z_i <- z_i / sum(z_i)
+      } else {
+          z_i <- rep(1/G, G) 
+      }
+  }
+
   for (g in 1:G) {
     if (z_i[g] > 1e-10) {
       mu_g <- parameters$mean[, g]
@@ -614,48 +635,227 @@ conditional_imputation <- function(obs_values, obs_indices, miss_indices, parame
   return(imputed_values)
 }
 
-# Helper function to extract covariance matrix from mclust variance structure
 get_component_covariance <- function(variance_struct, g) {
+  # Ensure variance_struct is not NULL and is a list
+  if (is.null(variance_struct) || !is.list(variance_struct)) {
+    stop("variance_struct is NULL or not a list.")
+  }
+
+  # Ensure modelName, d (dimension), and G (num components) are present and valid
+  if (is.null(variance_struct$modelName) || !is.character(variance_struct$modelName) || length(variance_struct$modelName) != 1) {
+    stop("variance_struct must contain a single string 'modelName'.")
+  }
+  if (is.null(variance_struct$d) || !is.numeric(variance_struct$d) || length(variance_struct$d) != 1 || variance_struct$d < 0 || floor(variance_struct$d) != variance_struct$d) {
+    stop("variance_struct must contain 'd' (dimension) as a single non-negative integer.")
+  }
+  # G=0 is not typical for a fitted model's parameters. If it occurs, it implies no components.
+  # If G=0, then g cannot be valid.
+  if (is.null(variance_struct$G) || !is.numeric(variance_struct$G) || length(variance_struct$G) != 1 || variance_struct$G < 1 || floor(variance_struct$G) != variance_struct$G) {
+    stop("variance_struct must contain 'G' (number of components) as a single positive integer.")
+  }
+  
   modelName <- variance_struct$modelName
-  
-  # For EEE model - equal covariance matrices
-  if (modelName == "EEE") {
-    return(variance_struct$Sigma)
+  d <- variance_struct$d
+  G <- variance_struct$G
+
+  # Validate g (g > G is now safe as G is confirmed to be a positive integer)
+  if (!is.numeric(g) || length(g) != 1 || g < 1 || g > G ) { 
+    stop(paste("Invalid component index 'g'=", g, ". Must be an integer between 1 and G (", G, ").", sep=""))
   }
-  
-  # For spherical models (EII, VII)
-  if (modelName == "EII") {
-    p <- variance_struct$d
-    return(variance_struct$sigmasq * diag(p))
+
+  # --- Univariate Models ---
+  if (d == 1) {
+    if (modelName == "E") { # Equal variance
+      if (!is.null(variance_struct$sigmasq) && is.numeric(variance_struct$sigmasq) && length(variance_struct$sigmasq) == 1) {
+        return(matrix(variance_struct$sigmasq))
+      } else {
+        stop("For univariate 'E' model, variance_struct$sigmasq should be a single numeric value.")
+      }
+    }
+    if (modelName == "V") { # Variable variance
+      if (!is.null(variance_struct$sigmasq) && is.numeric(variance_struct$sigmasq) && length(variance_struct$sigmasq) == G) {
+        return(matrix(variance_struct$sigmasq[g]))
+      } else {
+        stop(paste("For univariate 'V' model, variance_struct$sigmasq should be a numeric vector of length G (",G,").",sep=""))
+      }
+    }
+    # If d=1 but modelName is a multivariate one, it will fall through. 
+    # This is generally okay as mclust would fit "E" or "V" for d=1.
+    # If a multivariate model name is forced on d=1 data, the following sections should handle it if d=1.
   }
-  
-  if (modelName == "VII") {
-    p <- variance_struct$d
-    return(variance_struct$sigmasq[g] * diag(p))
+
+  # --- Multivariate Models ---
+
+  # Spherical models: Sigma_k = lambda_k * I
+  if (modelName == "EII") { # Spherical, equal volume (lambda * I)
+    if (!is.null(variance_struct$sigmasq) && is.numeric(variance_struct$sigmasq) && length(variance_struct$sigmasq) == 1) {
+      return(diag(x = variance_struct$sigmasq, nrow = d, ncol = d))
+    } else {
+      stop("For 'EII' model, variance_struct$sigmasq should be a single numeric value.")
+    }
   }
-  
-  # For models with full covariance matrices
-  if (modelName %in% c("VVV", "EVE", "VEV", "EEV", "VVE", "EVV", "VEE")) {
-    if (!is.null(variance_struct$sigma)) {
-      return(variance_struct$sigma[,,g])
+  if (modelName == "VII") { # Spherical, unequal volume (lambda_k * I)
+    if (!is.null(variance_struct$sigmasq) && is.numeric(variance_struct$sigmasq) && length(variance_struct$sigmasq) == G) {
+      return(diag(x = variance_struct$sigmasq[g], nrow = d, ncol = d))
+    } else {
+      stop(paste("For 'VII' model, variance_struct$sigmasq should be a numeric vector of length G (",G,").",sep=""))
     }
   }
   
-  # For diagonal models
   if (modelName %in% c("EEI", "VEI", "EVI", "VVI")) {
-    if (!is.null(variance_struct$scale)) {
-      return(diag(variance_struct$scale[,g]))
+    # Path 1: Use variance_struct$sigma directly (preferred for diagonal models)
+    # According to mclust documentation, variance_struct$sigma is a (d x d x G) array for these.
+    if (!is.null(variance_struct$sigma) && is.array(variance_struct$sigma) && 
+        length(dim(variance_struct$sigma)) == 3 &&
+        dim(variance_struct$sigma)[1] == d && dim(variance_struct$sigma)[2] == d && dim(variance_struct$sigma)[3] == G) {
+      return(variance_struct$sigma[,,g, drop = FALSE])
+    } else if (modelName == "EEI" && !is.null(variance_struct$Sigma) && is.matrix(variance_struct$Sigma) && 
+               all(dim(variance_struct$Sigma) == c(d,d))) {
+      # Path 1b: EEI might store a single common covariance matrix variance_struct$Sigma
+       return(variance_struct$Sigma)
+    } else if (!is.null(variance_struct$scale) && !is.null(variance_struct$shape)) {
+        # Path 2: Fallback to reconstruction from scale and shape if sigma array is not as expected.
+        # This path is less common for these models if mclust output is standard.
+        
+        current_scale_val <- NA # Renamed from current_scale to avoid conflict with base::scale
+        if (length(variance_struct$scale) == 1) { # Common scale (E models like EEI, EVI)
+            current_scale_val <- variance_struct$scale
+        } else if (length(variance_struct$scale) == G) { # Varying scale (V models like VEI, VVI)
+            current_scale_val <- variance_struct$scale[g]
+        } else {
+            stop(paste("For diagonal model", modelName, ", 'scale' has unexpected length. Expected 1 or G (",G,"). Actual:", length(variance_struct$scale)))
+        }
+
+        current_shape_diag_elements <- NULL
+        if (is.vector(variance_struct$shape) && length(variance_struct$shape) == d) { # Common shape (E models like EEI, VEI)
+            current_shape_diag_elements <- variance_struct$shape
+        } else if (is.matrix(variance_struct$shape) && nrow(variance_struct$shape) == d && ncol(variance_struct$shape) == G) { # Varying shape (V models like EVI, VVI)
+            current_shape_diag_elements <- variance_struct$shape[,g]
+        } else {
+            stop(paste("For diagonal model", modelName, ", 'shape' has unexpected dimensions. Expected vector of length d (",d,") or d x G matrix (",d,"x",G,"). Actual dims:", paste(dim(variance_struct$shape),collapse="x"), "or length:", length(variance_struct$shape)))
+        }
+        
+        # The elements of 'shape' are normalized such that prod(shape[,k]) = 1 (for d>0).
+        # The diagonal elements of Sigma_k are lambda_k * shape_elements_k,
+        # where lambda_k is variance_struct$scale[k]^d (volume).
+        lambda_k_volume <- current_scale_val^d
+        if (d == 0 && current_scale_val == 0) lambda_k_volume <- 0 
+        else if (d == 0 && current_scale_val != 0) lambda_k_volume <- 1
+
+        diag_elements <- lambda_k_volume * current_shape_diag_elements
+        return(diag(diag_elements, nrow = d, ncol = d))
+    } else {
+      stop(paste("For diagonal model '", modelName, "', expected variance_struct$sigma (dxdxG array), or variance_struct$Sigma (dxd matrix for EEI), or variance_struct$scale & shape were not found or structured as expected.", sep=""))
+    }
+  }
+
+  # EEE: Sigma_k = Sigma (common volume, shape, orientation)
+  if (modelName == "EEE") {
+    if (!is.null(variance_struct$Sigma) && is.matrix(variance_struct$Sigma) && all(dim(variance_struct$Sigma) == c(d,d))) {
+      return(variance_struct$Sigma)
+    } else if (!is.null(variance_struct$cholSigma) && is.matrix(variance_struct$cholSigma) && all(dim(variance_struct$cholSigma) == c(d,d))) {
+      return(crossprod(variance_struct$cholSigma))
+    } else {
+      stop("For 'EEE' model, variance_struct$Sigma (d x d matrix) or variance_struct$cholSigma was not found or structured as expected.")
+    }
+  }
+
+  # VVV: Sigma_k = lambda_k * D_k * A_k * D_k^T (varying volume, shape, orientation)
+  # mclust stores these directly in variance_struct$sigma[,,g]
+  if (modelName == "VVV") {
+    if (!is.null(variance_struct$sigma) && is.array(variance_struct$sigma) && 
+        length(dim(variance_struct$sigma)) == 3 &&
+        dim(variance_struct$sigma)[1] == d && dim(variance_struct$sigma)[2] == d && dim(variance_struct$sigma)[3] == G) {
+      return(variance_struct$sigma[,,g, drop = FALSE])
+    } else if (!is.null(variance_struct$cholsigma) && is.array(variance_struct$cholsigma) &&
+               length(dim(variance_struct$cholsigma)) == 3 &&
+               dim(variance_struct$cholsigma)[1] == d && dim(variance_struct$cholsigma)[2] == d && dim(variance_struct$cholsigma)[3] == G) {
+      return(crossprod(variance_struct$cholsigma[,,g, drop = FALSE]))
+    } else {
+      stop(paste("For 'VVV' model, variance_struct$sigma (dxdxG array) or variance_struct$cholsigma (dxdxG array) was not found or structured as expected. Dims of sigma:", paste(dim(variance_struct$sigma), collapse="x")))
     }
   }
   
-  # Try to reconstruct from eigenvalue decomposition if available
-  if (!is.null(variance_struct$d) && !is.null(variance_struct$shape) && !is.null(variance_struct$orientation)) {
-    # Todo: implementing the eigenvalue decomposition
-    # Currently fall back to identity matrix
-    warning("Could not extract covariance matrix, using identity matrix")
-    return(diag(variance_struct$d))
+  # Models requiring reconstruction from scale, shape, and orientation: EEV, EVE, EVV, VEE, VEV, VVE
+  # These models have specific combinations of equal/varying scale, shape, orientation.
+  
+  current_scale_val <- NA
+  # Determine scale for component g
+  if (modelName %in% c("EEV", "EVE", "EVV")) { # Equal volume
+    if (!is.null(variance_struct$scale) && is.numeric(variance_struct$scale) && length(variance_struct$scale) == 1) {
+      current_scale_val <- variance_struct$scale
+    } else {
+      stop(paste("For model '", modelName, "', variance_struct$scale should be a single numeric value (equal volume). Found length:", length(variance_struct$scale)))
+    }
+  } else if (modelName %in% c("VEE", "VEV", "VVE")) { # Varying volume
+    if (!is.null(variance_struct$scale) && is.numeric(variance_struct$scale) && length(variance_struct$scale) == G) {
+      current_scale_val <- variance_struct$scale[g]
+    } else {
+      stop(paste("For model '", modelName, "', variance_struct$scale should be a numeric vector of length G (",G,"). Found length:", length(variance_struct$scale)))
+    }
+  } else {
+    # This block should only be reached if modelName is one of EEV, EVE, EVV, VEE, VEV, VVE
+    # but the scale was not assigned, which implies a logic error or unhandled model.
+    # However, the previous specific model blocks (EII, VII, EEI..., EEE, VVV) should catch most models.
+    # This path is for the remaining ellipsoidal models.
   }
-  stop(paste("Cannot extract covariance matrix for model", modelName, "and variance structure"))
+
+  current_shape_matrix <- NULL
+  # Determine shape matrix (diag of normalized eigenvalues) for component g
+  if (modelName %in% c("EVE", "VEE")) { # Equal shape
+    if (!is.null(variance_struct$shape) && is.numeric(variance_struct$shape) && length(variance_struct$shape) == d) {
+      if(d > 0 && abs(prod(variance_struct$shape) - 1) > 1e-6) warning(paste("Product of shape eigenvalues for model", modelName, "is not 1. Product:", prod(variance_struct$shape)))
+      current_shape_matrix <- diag(variance_struct$shape, nrow = d, ncol = d)
+    } else {
+      stop(paste("For model '", modelName, "', variance_struct$shape should be a numeric vector of length d (",d,") (equal shape). Found length:", length(variance_struct$shape)))
+    }
+  } else if (modelName %in% c("EEV", "VEV", "EVV", "VVE")) { # Varying shape
+     if (!is.null(variance_struct$shape) && is.matrix(variance_struct$shape) && 
+        nrow(variance_struct$shape) == d && ncol(variance_struct$shape) == G) {
+      if(d > 0 && abs(prod(variance_struct$shape[,g]) - 1) > 1e-6) warning(paste("Product of shape eigenvalues for model", modelName, "component", g, "is not 1. Product:", prod(variance_struct$shape[,g])))
+      current_shape_matrix <- diag(variance_struct$shape[,g], nrow = d, ncol = d)
+    } else {
+      stop(paste("For model '", modelName, "', variance_struct$shape should be a d x G matrix (d=",d,", G=",G,"). Actual dims:", paste(dim(variance_struct$shape), collapse="x")))
+    }
+  }
+
+  current_orientation_matrix <- NULL
+  # Determine orientation matrix for component g
+  if (modelName %in% c("EEV", "VEE")) { # Equal orientation
+    if (!is.null(variance_struct$orientation) && is.matrix(variance_struct$orientation) && 
+        all(dim(variance_struct$orientation) == c(d,d))) {
+      current_orientation_matrix <- variance_struct$orientation
+    } else {
+      stop(paste("For model '", modelName, "', variance_struct$orientation should be a d x d matrix (equal orientation). Actual dims:", paste(dim(variance_struct$orientation), collapse="x")))
+    }
+  } else if (modelName %in% c("EVE", "VEV", "EVV", "VVE")) { # Varying orientation
+    if (!is.null(variance_struct$orientation) && is.array(variance_struct$orientation) &&
+        length(dim(variance_struct$orientation)) == 3 &&
+        dim(variance_struct$orientation)[1] == d && dim(variance_struct$orientation)[2] == d && 
+        dim(variance_struct$orientation)[3] == G) {
+      current_orientation_matrix <- variance_struct$orientation[,,g, drop = FALSE]
+    } else {
+      stop(paste("For model '", modelName, "', variance_struct$orientation should be a d x d x G array (d=",d,", G=",G,"). Actual dims:", paste(dim(variance_struct$orientation), collapse="x")))
+    }
+  }
+  
+  # Reconstruct covariance if all parts for ellipsoidal models (EEV, EVE, EVV, VEE, VEV, VVE) are found
+  if (!is.na(current_scale_val) && !is.null(current_shape_matrix) && !is.null(current_orientation_matrix)) {
+    lambda_k_volume <- current_scale_val^d
+    if (d == 0 && current_scale_val == 0) lambda_k_volume <- 0 
+    else if (d == 0 && current_scale_val != 0) lambda_k_volume <- 1 
+
+    if (d > 0) {
+      # Sigma_k = D_k * (lambda_k * A_k) * D_k^T
+      # where lambda_k is volume, D_k is orientation, A_k is diagonal matrix of normalized eigenvalues (shape)
+      cov_matrix <- current_orientation_matrix %*% (lambda_k_volume * current_shape_matrix) %*% t(current_orientation_matrix)
+      return(cov_matrix)
+    } else if (d == 0) { # d == 0
+      return(matrix(numeric(0), nrow=0, ncol=0)) 
+    }
+  }
+  stop(paste("Unsupported or unrecognized modelName '", modelName, 
+             "' or variance structure not correctly specified for reconstruction after checking all known model types.", sep=""))
 }
 
 resp_to_full_data <- function(init_result, data_imputed, complete_cases, G) {
