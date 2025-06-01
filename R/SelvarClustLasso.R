@@ -38,7 +38,7 @@ SelvarClustLasso <- function(
 
   # Input Validation
   CheckInputsC(x, nbcluster, lambda, rho, type, hsize, criterion, models, rmodel, imodel, nbcores)
-  
+
   # Data Preprocessing
   x <- as.matrix(x)
   n <- as.integer(nrow(x))
@@ -48,37 +48,39 @@ SelvarClustLasso <- function(
   # Force garbage collection after setup
   gc(verbose = FALSE)
   
+  # Start timer for verbose output
+  start_time <- Sys.time()
 
-if (scale_data == FALSE && check_scale_data(x, sd_ratio_threshold,
-                                               cond_number_threshold,
-                                               use=scale_check_method)) {
-  warning("Ensure data has been scale since input matrix is ill-conditioned (κ = ", round(cond_number_threshold,2),
-          ") but 'scale_data = FALSE'. Proceeding anyway.")}
+  if (scale_data == FALSE && check_scale_data(x, sd_ratio_threshold,
+                                                cond_number_threshold,
+                                                use=scale_check_method)) {
+    warning("Ensure data has been scale since input matrix is ill-conditioned (κ = ", round(cond_number_threshold,2),
+            ") but 'scale_data = FALSE'. Proceeding anyway.")}
 
-  do_scale <- if (scale_data) check_scale_data(x, sd_ratio_threshold,
-                                               cond_number_threshold,
-                                               use=scale_check_method) else FALSE                        
-  centers <- if (do_scale) colMeans(x,  na.rm = TRUE) else rep(0, p)
-  sds     <- if (do_scale) apply(  x, 2, sd, na.rm = TRUE) else rep(1, p)
+    do_scale <- if (scale_data) check_scale_data(x, sd_ratio_threshold,
+                                                cond_number_threshold,
+                                                use=scale_check_method) else FALSE                        
+    centers <- if (do_scale) colMeans(x,  na.rm = TRUE) else rep(0, p)
+    sds     <- if (do_scale) apply(  x, 2, sd, na.rm = TRUE) else rep(1, p)
 
-  x_scaled <- sweep(x, 2, centers, "-")
-  x_scaled <- sweep(x_scaled, 2, sds,    "/")
-  
-  # Impute if needed
-  if (impute_missing && any(is.na(x_scaled))) {
-    if (use_copula) {
-      x_imp_scaled <- as.matrix(impute_GC(as.data.frame(x_scaled),
-                                          verbose = FALSE)$Ximp)
+    x_scaled <- sweep(x, 2, centers, "-")
+    x_scaled <- sweep(x_scaled, 2, sds,    "/")
+    
+    # Impute if needed
+    if (impute_missing && any(is.na(x_scaled))) {
+      if (use_copula) {
+        x_imp_scaled <- as.matrix(impute_GC(as.data.frame(x_scaled),
+                                            verbose = FALSE)$Ximp)
+      } else {
+        x_imp_scaled <- as.matrix(missRanger(as.data.frame(x_scaled), verbose = 0))
+      }
     } else {
-      x_imp_scaled <- as.matrix(missRanger(as.data.frame(x_scaled), verbose = 0))
+      warning("Missing values present but impute_missing = FALSE")
+      x_imp_scaled <- x_scaled
     }
-  } else {
-    warning("Missing values present but impute_missing = FALSE")
-    x_imp_scaled <- x_scaled
-  }
 
-  x_imp_orig <- sweep(x_imp_scaled, 2, sds, "*")
-  x_imp_orig <- sweep(x_imp_orig, 2, centers, "+")
+    x_imp_orig <- sweep(x_imp_scaled, 2, sds, "*")
+    x_imp_orig <- sweep(x_imp_orig, 2, centers, "+")
 
   # Force garbage collection after data preprocessing
   gc(verbose = FALSE)
