@@ -114,7 +114,9 @@ SelvarClustLasso <- function(
     init      = NULL,
     method    = "usual",
     S         = 250,
-    initialize = "hc"
+    initialize = "hc",
+    use_glasso = FALSE,
+    lambda_omega_0 = 50
   )
   mnarz_control <- utils::modifyList(.mnarz_defaults, mnarz_control)
 
@@ -303,7 +305,9 @@ SelvarClustLasso <- function(
                                           S = mnarz_control$S,
                                           max_iter = mnarz_control$rmax,
                                           init_method = mnarz_control$initialize,
-                                          tol = 1e-8,
+                                          tol = 1e-6,
+                                          use_glasso = mnarz_control$use_glasso,
+                                          lambda_omega_0 = mnarz_control$lambda_omega_0,
                                           verbose = FALSE
                                       )
         }, error = function(e) {
