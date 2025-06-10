@@ -1,3 +1,408 @@
+EM_impute <- function(data, 
+                     G = 3, 
+                     modelName = "VVV",
+                     max_iter = 1000,
+                     tol = 1e-6,
+                     init_method = "hc",
+                     method = "usual", 
+                     S = 50, 
+                     verbose = FALSE,
+                     use_glasso = FALSE,     
+                     lambda_omega_0 = 50,     
+                     n_samples = 100,           
+                     burn_in_ratio = 0.1) {      
+  
+  # Validate method parameter
+  method <- match.arg(method, c("usual", "sampling", "sampling_usual"))
+  
+  if (is.data.frame(data)) {
+    data <- as.matrix(data)
+  }
+  
+  n <- nrow(data)
+  p <- ncol(data)
+  
+  missing_pattern <- is.na(data)
+  has_missing <- any(missing_pattern)
+  
+  if (!has_missing) {
+    warning("No missing values found in data")
+    return(list(
+      imputed_data = data,
+      converged = TRUE,
+      iterations = 0,
+      loglik = NA,
+      parameters = NULL,
+      method = method
+    ))
+  }
+  
+  if (verbose) cat("Initializing parameters using method:", init_method, "\n")
+  
+  # Initialize based on method
+  if (method %in% c("usual", "sampling_usual")) {
+    complete_cases <- complete.cases(data)
+    if (sum(complete_cases) < G) {
+      warning("Not enough complete cases - using mean-imputed data for initialization")
+      init_data <- data
+      for (j in 1:p) {
+        missing_j <- is.na(data[, j])
+        if (any(missing_j)) {
+          init_data[missing_j, j] <- mean(data[!missing_j, j], na.rm = TRUE)
+        }
+      }
+      complete_cases <- rep(TRUE, n)
+    } else {
+      init_data <- data[complete_cases, , drop = FALSE]
+    }
+    
+    init_result <- InitParameterRobust(init_data, 
+                                 nbClust = G, 
+                                 init = init_method,
+                                 use_glasso = use_glasso,
+                                 lambda_omega_0 = lambda_omega_0)
+    
+    # Initial imputation with means
+    data_imputed <- data
+    for (j in 1:p) {
+      missing_j <- is.na(data[, j])
+      if (any(missing_j)) {
+        data_imputed[missing_j, j] <- mean(data[!missing_j, j], na.rm = TRUE)
+      }
+    }
+    
+    em_control <- mclust::emControl(tol = tol, itmax = max_iter)
+    z_current <- resp_to_full_data(init_result, data_imputed, complete_cases, G)
+    
+  } else {  # MMCEM2 method
+    split_data <- PartitionData(data)
+    comp_data <- split_data$data_comp
+    
+    if(nrow(comp_data) < G) {
+      stop("Number of complete cases is less than the number of clusters")
+    }
+    
+    init_results <- InitParameterRobust(comp_data, 
+                                  nbClust = G, 
+                                  init = init_method,
+                                  use_glasso = use_glasso,
+                                  lambda_omega_0 = lambda_omega_0)
+    
+    means <- lapply(1:G, function(g) {
+      as.numeric(init_results$Mu[, g])
+    })
+    
+    covs <- lapply(1:G, function(g) {
+      regularize_cov(init_results$SigmaCube[, , g])
+    })
+    
+    pi <- init_results$prop
+    
+    # Initial imputation
+    data_imputed <- data
+    
+    if(split_data$n1 > 0) {
+      incomp_data <- split_data$data_incomp
+      for(i in 1:nrow(incomp_data)) {
+        y <- incomp_data[i,]
+        idx_miss <- which(is.na(y))
+        idx_obs <- which(!is.na(y))
+        
+        if(length(idx_obs) > 0) {
+          # Use most probable component for initial imputation
+          g <- which.max(pi)
+          cond_dist <- CalcCondDist(y, idx_miss, idx_obs, means[[g]], covs[[g]])
+          imputed_values <- mvnfast::rmvn(1, mu = cond_dist$mu, sigma = cond_dist$sigma)
+          data_imputed[split_data$idx_incomp[i], idx_miss] <- imputed_values
+        } else {
+          # If no observed values, use marginal mean
+          data_imputed[split_data$idx_incomp[i], idx_miss] <- means[[1]][idx_miss]
+        }
+      }
+    }
+  }
+  
+  if (verbose) cat("Starting EM algorithm...\n")
+  
+  loglik_old <- -Inf
+  converged <- FALSE
+  iter <- 0
+  
+  # Main EM loop
+  for (iter in 1:max_iter) {
+    if (verbose && iter %% 10 == 0) {
+      cat(sprintf("Iteration %d\n", iter))
+    }
+    
+    if (method == "usual") {
+      me_result <- mclust::me(data = data_imputed, 
+                      modelName = modelName,
+                      z = z_current,
+                      control = em_control)
+      
+      if (is.null(me_result) || is.null(me_result$parameters)) {
+        if (verbose) cat("EM algorithm failed - using previous iteration\n")
+        break
+      }
+      
+      # Update responsibilities
+      estep_result <- mclust::estep(modelName = modelName,
+                           data = data_imputed,
+                           parameters = me_result$parameters)
+      
+      z_current <- estep_result$z
+      
+      # Impute missing values
+      data_imputed_new <- impute_missing_values(
+        data, 
+        me_result$parameters, 
+        z_current, 
+        missing_pattern
+      )
+      
+      # Compute observed-data log-likelihood
+      loglik_new <- compute_observed_loglik(data, me_result$parameters)
+      
+    } else if (method == "sampling_usual") {
+      me_result <- mclust::me(data = data_imputed, 
+                      modelName = modelName,
+                      z = z_current,
+                      control = em_control)
+      
+      if (is.null(me_result) || is.null(me_result$parameters)) {
+        if (verbose) cat("EM algorithm failed - using previous iteration\n")
+        break
+      }
+      
+      # Update responsibilities
+      estep_result <- mclust::estep(modelName = modelName,
+                           data = data_imputed,
+                           parameters = me_result$parameters)
+      
+      z_current <- estep_result$z
+      
+      # Sampling-based imputation
+      data_imputed_new <- impute_with_sampling(
+        data, 
+        me_result$parameters, 
+        z_current, 
+        missing_pattern,
+        n_samples = n_samples,
+        burn_in_ratio = burn_in_ratio
+      )
+      
+      # Compute observed-data log-likelihood
+      loglik_new <- compute_observed_loglik(data, me_result$parameters)
+      
+    } else {  # MMCEM2 method
+      split_data <- PartitionData(data) 
+      
+      # E-step: Calculate responsibilities
+      resp <- Responsibility(split_data, means, covs, pi) 
+
+      # Augment incomplete data with MC samples
+      if (split_data$n1 > 0) {
+        all_aug_data_list <- vector("list", split_data$n1)
+        all_aug_weights_list <- vector("list", split_data$n1)
+
+        for (obs_idx in 1:split_data$n1) {
+          original_data_row_idx <- split_data$idx_incomp[obs_idx]
+          y_original_incomplete_row <- data[original_data_row_idx, , drop = FALSE]
+          is_na_y <- is.na(y_original_incomplete_row)
+          idx_miss <- which(is_na_y)
+          idx_obs <- which(!is_na_y)
+          y_obs_values <- y_original_incomplete_row[1, idx_obs, drop = TRUE] 
+          gamma_i <- resp$gamma1[obs_idx, ]
+          
+          observation_aug_data_list <- vector("list", G)
+          observation_aug_weights_list <- vector("list", G)
+      
+          for (g_comp in 1:G) {
+            current_imps <- matrix(NA, nrow = S, ncol = length(idx_miss))
+            
+            if (length(idx_miss) > 0) {
+              if (length(idx_obs) > 0) {
+                cond_dist <- CalcCondDist(y_original_incomplete_row, idx_miss, idx_obs, means[[g_comp]], covs[[g_comp]])
+                
+                # Check covariance PD status
+                eigv <- eigen(cond_dist$sigma, symmetric = TRUE, only.values = TRUE)$values
+                is_sigma_cond_pd <- min(eigv) > 1e-8
+                
+                if(is_sigma_cond_pd) {
+                  current_imps <- mvnfast::rmvn(S, mu = cond_dist$mu, sigma = cond_dist$sigma)
+                } else {
+                  # Use regularized covariance
+                  cond_dist$sigma <- regularize_cov(cond_dist$sigma)
+                  current_imps <- mvnfast::rmvn(S, mu = cond_dist$mu, sigma = cond_dist$sigma)
+                }
+              } else {
+                # Marginal imputation
+                marginal_cov_miss <- covs[[g_comp]][idx_miss, idx_miss, drop = FALSE]
+                marginal_cov_miss <- regularize_cov(marginal_cov_miss)
+                current_imps <- mvnfast::rmvn(S, mu = means[[g_comp]][idx_miss], sigma = marginal_cov_miss)
+              }
+            }
+            
+            # Reconstruct full data vectors
+            reconstructed_samples <- matrix(NA, nrow = S, ncol = p)
+            if (length(idx_obs) > 0) {
+              reconstructed_samples[, idx_obs] <- matrix(rep(y_obs_values, S), nrow = S, byrow = TRUE)
+            }
+            if (length(idx_miss) > 0) {
+              reconstructed_samples[, idx_miss] <- current_imps
+            }
+            observation_aug_data_list[[g_comp]] <- reconstructed_samples
+            
+            # Weights for these samples
+            current_weights <- matrix(0, nrow = S, ncol = G)
+            current_weights[, g_comp] <- gamma_i[g_comp] / S
+            observation_aug_weights_list[[g_comp]] <- current_weights
+          }
+          
+          all_aug_data_list[[obs_idx]] <- do.call(rbind, observation_aug_data_list)
+          all_aug_weights_list[[obs_idx]] <- do.call(rbind, observation_aug_weights_list)
+        }
+        
+        aug_data_combined <- do.call(rbind, all_aug_data_list)
+        aug_weights_combined <- do.call(rbind, all_aug_weights_list)
+      } else {
+        aug_data_combined <- matrix(nrow = 0, ncol = p)
+        aug_weights_combined <- matrix(nrow = 0, ncol = G)
+      }
+
+      # Combine data and weights
+      full_data <- rbind(split_data$data_comp, aug_data_combined)
+      weights_for_mstep <- matrix(0, nrow = nrow(full_data), ncol = G)
+      if (split_data$n0 > 0) {
+        weights_for_mstep[1:split_data$n0, ] <- resp$gamma0
+      }
+      if (nrow(aug_data_combined) > 0) {
+        weights_for_mstep[(split_data$n0 + 1):nrow(full_data), ] <- aug_weights_combined
+      }
+      
+      # M-step with mclust
+      mstep_result <- mclust::mstep(data = full_data, modelName = modelName, z = weights_for_mstep)
+      
+      # Update parameters
+      means <- lapply(1:G, function(g) as.numeric(mstep_result$parameters$mean[,g]))
+      covs <- lapply(1:G, function(g) {
+        cov_mat <- mstep_result$parameters$variance$sigma[,,g]
+        regularize_cov(cov_mat)
+      })
+      pi <- mstep_result$parameters$pro
+      
+      # Calculate new log-likelihood
+      new_resp <- Responsibility(split_data, means, covs, pi)
+      loglik_new <- 0
+      if(split_data$n0 > 0) {
+        loglik_new <- loglik_new + sum(log(rowSums(new_resp$dens_eval0)))
+      }
+      if(split_data$n1 > 0) {
+        loglik_new <- loglik_new + sum(log(rowSums(new_resp$dens_eval1)))
+      }
+      
+      # Update imputed data
+      data_imputed_new <- data_imputed
+      if(split_data$n1 > 0) {
+        incomp_data <- split_data$data_incomp
+        for(i in 1:nrow(incomp_data)) {
+          y <- incomp_data[i,]
+          idx_miss <- which(is.na(y))
+          idx_obs <- which(!is.na(y))
+          
+          gamma_i <- new_resp$gamma1[i,]
+          best_cluster <- which.max(gamma_i)
+          
+          cond_dist <- CalcCondDist(y, idx_miss, idx_obs, means[[best_cluster]], covs[[best_cluster]])
+          imputed_values <- mvnfast::rmvn(1, mu = cond_dist$mu, sigma = cond_dist$sigma)
+          data_imputed_new[split_data$idx_incomp[i], idx_miss] <- imputed_values
+        }
+      }
+      
+      # Store mstep_result
+      me_result <- list(
+        parameters = mstep_result$parameters,
+        loglik = loglik_new
+      )
+    }
+    
+    # Check convergence
+    if (method %in% c("usual", "sampling_usual")) {
+      delta_ll <- (loglik_new - loglik_old) / max(1, abs(loglik_old))
+    } else {
+      delta_ll <- (loglik_new - loglik_old) / max(1, abs(loglik_new))
+    }
+    
+    if (abs(delta_ll) < tol) {
+      converged <- TRUE
+      if (verbose) cat(sprintf("Converged at iteration %d\n", iter))
+      break
+    }
+    
+    # Update for next iteration
+    data_imputed <- data_imputed_new
+    loglik_old <- loglik_new
+  }
+  
+  if (!converged && verbose) {
+    cat("Algorithm did not converge within maximum iterations\n")
+  }
+  
+  # Final imputation
+  if (method == "usual") {
+    final_imputed <- impute_missing_values(data, me_result$parameters, z_current, missing_pattern)
+    final_responsibilities <- z_current
+  } else if (method == "sampling_usual") {
+    final_imputed <- impute_with_sampling(
+      data, 
+      me_result$parameters, 
+      z_current, 
+      missing_pattern,
+      n_samples = n_samples,
+      burn_in_ratio = burn_in_ratio
+    )
+    final_responsibilities <- z_current
+  } else {  # MMCEM2 method
+    split_data <- PartitionData(data)
+    final_resp <- Responsibility(split_data, means, covs, pi)
+    
+    final_imputed <- data
+    if(split_data$n1 > 0) {
+      incomp_data <- split_data$data_incomp
+      for(i in 1:nrow(incomp_data)) {
+        y <- incomp_data[i,]
+        idx_miss <- which(is.na(y))
+        idx_obs <- which(!is.na(y))
+        
+        gamma_i <- final_resp$gamma1[i,]
+        best_cluster <- which.max(gamma_i)
+        
+        cond_dist <- CalcCondDist(y, idx_miss, idx_obs, means[[best_cluster]], covs[[best_cluster]])
+        imputed_values <- mvnfast::rmvn(1, mu = cond_dist$mu, sigma = cond_dist$sigma)
+        final_imputed[split_data$idx_incomp[i], idx_miss] <- imputed_values
+      }
+    }
+  
+    final_responsibilities <- matrix(0, nrow = n, ncol = G)
+    if(split_data$n0 > 0) {
+      final_responsibilities[split_data$idx_comp, ] <- final_resp$gamma0
+    }
+    if(split_data$n1 > 0) {
+      final_responsibilities[split_data$idx_incomp, ] <- final_resp$gamma1
+    }
+  }
+  
+  return(list(
+    imputed_data = final_imputed,
+    converged = converged,
+    iterations = iter,
+    loglik = loglik_new,
+    parameters = me_result$parameters,
+    responsibilities = final_responsibilities,
+    method = method
+  ))
+}
+
 PartitionData <- function(data) {
   d <- ncol(data)
   idx <- seq(1:nrow(data))
@@ -171,412 +576,304 @@ convert_mclust_to_lists <- function(parameters) {
   return(list(means = means, covs = covs, pi = pi))
 }
 
-EM_impute <- function(data, 
-                     G = 3, 
-                     modelName = "VVV",
-                     max_iter = 1000,
-                     tol = 1e-6,
-                     init_method = "hc",
-                     method = "usual", 
-                     S = 10, 
-                     verbose = FALSE) {
-  
-  # Validate method parameter
-  method <- match.arg(method, c("usual", "sampling"))
-  
-  if (is.data.frame(data)) {
-    data <- as.matrix(data)
-  }
-  
+InitParameterRobust <- function(data, nbClust, init = c("kmeans", "hc"), n.start = 25,
+                          use_glasso = FALSE, lambda_omega_0 = 50) {
+  data <- as.matrix(data)
   n <- nrow(data)
   p <- ncol(data)
+  init <- match.arg(init)
   
-  missing_pattern <- is.na(data)
-  has_missing <- any(missing_pattern)
+  # Initialization with dimensionality reduction
+  robust_init <- function(data, G) {
+    # Try PCA-based k-means first
+    tryCatch({
+      if (p > 1) {
+        pc <- prcomp(data, scale. = TRUE)
+        data_red <- pc$x[, 1:min(2, ncol(pc$x)), drop = FALSE]
+      } else {
+        data_red <- data
+      }
+      km <- kmeans(data_red, centers = G, nstart = n.start)
+      return(mclust::unmap(km$cluster))
+    }, error = function(e) {
+      # Fallback to hierarchical clustering
+      tryCatch({
+        hc <- hclust(dist(data))
+        return(mclust::unmap(cutree(hc, k = G)))
+      }, error = function(e) {
+        # Final fallback: random assignment
+        memb <- sample(1:G, n, replace = TRUE)
+        return(mclust::unmap(memb))
+      })
+    })
+  }
   
-  if (!has_missing) {
-    warning("No missing values found in data")
+  if (init == "kmeans") {
+    z_mat <- robust_init(data, nbClust)
+  } else {
+    tryCatch({
+      hcobj <- mclust::hc(data, modelName = "VVV", use = "SVD")
+      z_mat <- mclust::unmap(mclust::hclass(hcobj, nbClust))
+    }, error = function(e) {
+      z_mat <- robust_init(data, nbClust)
+    })
+  }
+  if (use_glasso){
+    n_k <- pmax(colSums(z_mat), 1)
+    prop <- n_k / n
+    Mu <- t(z_mat) %*% data / n_k
+  
+    # Compute regularized covariance
+    SigmaCube <- array(0, dim = c(p, p, nbClust))
+    for (g in 1:nbClust) {
+      cluster_data <- data[z_mat[, g] > 0.5, , drop = FALSE]
+      if (nrow(cluster_data) > 0) {
+        SigmaCube[, , g] <- regularize_cov(cov(cluster_data))
+      } else {
+        SigmaCube[, , g] <- diag(p)
+      }
+    }
     return(list(
-      imputed_data = data,
-      converged = TRUE,
-      iterations = 0,
-      loglik = NA,
-      parameters = NULL,
-      method = method
-    ))
+     prop = prop,
+     Mu = Mu,
+     SigmaCube = SigmaCube,
+     Z = z_mat))
   }
-  
-  if (verbose) cat("Initializing parameters using method:", method, "\n")
-  
-  # Initialize based on method
-  if (method == "usual") {
-    # Original initialization
-    complete_cases <- complete.cases(data)
-    if (sum(complete_cases) < G) {
-      stop("Not enough complete cases for initialization. Consider reducing G or using a different approach.")
-    }
-    
-    complete_data <- data[complete_cases, , drop = FALSE]
-    init_result <- InitParameter(complete_data, 
-                                nbClust = G, 
-                                init = init_method)
-    
-    # Initial imputation with means
-    data_imputed <- data
-    for (j in 1:p) {
-      missing_j <- is.na(data[, j])
-      if (any(missing_j)) {
-        data_imputed[missing_j, j] <- mean(data[!missing_j, j], na.rm = TRUE)
+  else{
+    n_k <- pmax(colSums(z_mat), 1)
+    prop <- n_k / n  
+    temp <- mclust::covw(data, z_mat, normalize = FALSE) 
+    sigma0 <- temp$S                              
+    omega0 <- array(NA_real_, dim = dim(sigma0))    
+    for (k in 1:nbClust) {
+      eigv <- eigen(sigma0[,,k], symmetric = TRUE, only.values = TRUE)$values
+      # If invertible, invert it
+      # Otherwise, use glassoFast to estimate the precision matrix
+      if (min(eigv) > sqrt(.Machine$double.eps)) {             
+        omega0[,,k] <- solve(sigma0[,,k])
+      } else {                                       
+        gl <- glassoFast::glassoFast(
+                S   = sigma0[,,k],
+                rho = lambda_omega_0 * sqrt(log(p)/n_k[k]),
+                thr = 1e-4, maxIt = 1000)
+        omega0[,,k] <- gl$wi
+        sigma0[,,k] <- gl$w
       }
     }
-    
-    em_control <- emControl(tol = tol, itmax = max_iter)
-    z_current <- resp_to_full_data(init_result, data_imputed, complete_cases, G)
-    
-  } else {
-    # MMCEM2 initialization
-    split_data <- PartitionData(data)
-    comp_data <- split_data$data_comp
-    
-    if(nrow(comp_data) < G) {
-      stop("Number of complete cases is less than the number of clusters")
-    }
-    
-    # Initialize with k-means on complete cases
-    # init_kmeans <- kmeans(comp_data, centers = G)
-    # means <- lapply(1:G, function(g) as.numeric(colMeans(comp_data[init_kmeans$cluster == g,,drop=F])))
-    # covs <- lapply(1:G, function(g) cov(comp_data[init_kmeans$cluster == g,,drop=F]))
-    # pi <- table(init_kmeans$cluster)/nrow(comp_data)
-    
-    init_results <- InitParameter(data = comp_data, 
-                             nbClust = G, 
-                             init = init_method)
-    
-    means <- lapply(1:G, function(g) {
-      as.numeric(init_results$Mu[, g])
-    })
-    
-    covs <- lapply(1:G, function(g) {
-      init_results$SigmaCube[, , g]
-    })
-    
-    pi <- init_results$prop
-    
-    
-    # Initial imputation
-    data_imputed <- data
-    
-    if(split_data$n1 > 0) {
-      incomp_data <- split_data$data_incomp
-      for(i in 1:nrow(incomp_data)) {
-        y <- incomp_data[i,]
-        idx_miss <- which(is.na(y))
-        idx_obs <- which(!is.na(y))
-        
-        if(length(idx_obs) > 0) {
-          # Use first component for initial imputation
-          cond_dist <- CalcCondDist(y, idx_miss, idx_obs, means[[1]], covs[[1]])
-          imputed_values <- mvnfast::rmvn(1, mu = cond_dist$mu, sigma = cond_dist$sigma)
-          data_imputed[split_data$idx_incomp[i], idx_miss] <- imputed_values
-        } else {
-          # If no observed values, use marginal mean
-          data_imputed[split_data$idx_incomp[i], idx_miss] <- means[[1]][idx_miss]
-        }
-      }
-    }
-  }
-  
-  if (verbose) cat("Starting EM algorithm...\n")
-  
-  loglik_old <- -Inf
-  converged <- FALSE
-  iter <- 0
-  
-  # Main EM loop
-  for (iter in 1:max_iter) {
-    if (verbose && iter %% 10 == 0) {
-      cat(sprintf("Iteration %d\n", iter))
-    }
-    
-    if (method == "usual") {
-      me_result <- me(data = data_imputed, 
-                      modelName = modelName,
-                      z = z_current,
-                      control = em_control)
-      
-      if (is.null(me_result) || is.null(me_result$parameters)) {
-        if (verbose) cat("EM algorithm failed - using previous iteration\n")
-        break
-      }
-      
-      # Update responsibilities
-      estep_result <- estep(modelName = modelName,
-                           data = data_imputed,
-                           parameters = me_result$parameters)
-      
-      z_current <- estep_result$z
-      
-      # Impute missing values using current parameters 
-      data_imputed_new <- impute_missing_values(data, me_result$parameters, z_current, missing_pattern)
-      
-      # Check convergence
-      loglik_new <- me_result$loglik
-      
-    } else {
-      split_data <- PartitionData(data) 
-      
-      # E-step
-      # Calculate responsibilities based on observed data
-      # resp$gamma0 for complete cases, resp$gamma1 for incomplete cases
-      resp <- Responsibility(split_data, means, covs, pi) 
-
-      # Augment incomplete data with MC samples and prepare corresponding weights
-      if (split_data$n1 > 0) { # If there are incomplete observations
-        # Get original column names once, if needed for reconstruction matching
-        # original_colnames <- colnames(data) 
-
-        # Pre-allocate lists to store augmented data and weights for each original incomplete observation
-        all_aug_data_list <- vector("list", split_data$n1)
-        all_aug_weights_list <- vector("list", split_data$n1)
-
-        for (obs_idx in 1:split_data$n1) { # For each original incomplete observation
-          original_data_row_idx <- split_data$idx_incomp[obs_idx] # Get original row index
-          y_original_incomplete_row <- data[original_data_row_idx, , drop = FALSE] # Get the original row with NAs
-      
-          is_na_y <- is.na(y_original_incomplete_row)
-          idx_miss <- which(is_na_y)
-          idx_obs <- which(!is_na_y)
-          
-          # Ensure y_obs_values is a vector, even if only one observed variable
-          y_obs_values <- y_original_incomplete_row[1, idx_obs, drop = TRUE] 
-      
-          # Responsibilities for this specific original incomplete observation
-          gamma_i_for_this_obs <- resp$gamma1[obs_idx, , drop = TRUE] 
-      
-          # Store S imputations & G weight vectors for *this* original incomplete observation
-          # Each list element will correspond to imputations for one component g
-          observation_specific_aug_data_list <- vector("list", G)
-          observation_specific_aug_weights_list <- vector("list", G)
-      
-          for (g_comp in 1:G) { # For each component g = 1,...,G
-            current_imps <- matrix(NA, nrow = S, ncol = length(idx_miss))
-      
-            if (length(idx_miss) > 0) { # Only impute if there are missing values
-                if (length(idx_obs) > 0) { # Condition on observed parts if they exist
-                  cond_dist <- CalcCondDist(y_original_incomplete_row, idx_miss, idx_obs, means[[g_comp]], covs[[g_comp]])
-                  
-                  # Check if conditional covariance is positive definite for sampling
-                  is_sigma_cond_pd <- TRUE
-                  if(any(is.na(cond_dist$sigma)) || any(diag(cond_dist$sigma) <= 1e-8) ) is_sigma_cond_pd <- FALSE
-                  if(is_sigma_cond_pd && nrow(cond_dist$sigma) > 1 && det(cond_dist$sigma) <= 1e-8) is_sigma_cond_pd <- FALSE
-                  
-                  if(is_sigma_cond_pd) {
-                    current_imps <- mvnfast::rmvn(S, mu = cond_dist$mu, sigma = cond_dist$sigma)
-                  } else {
-                    warning(paste("Conditional covariance for original row", original_data_row_idx, "component", g_comp, 
-                                  "is ill-conditioned. Using marginal imputation for S samples."))
-                    # Fallback: impute S samples from the marginal distribution of component g_comp for missing parts
-                    # Ensure covariance for marginal imputation is PD if subsetting
-                    marginal_cov_miss <- as.matrix(covs[[g_comp]][idx_miss, idx_miss, drop=FALSE])
-                    if(any(is.na(marginal_cov_miss)) || any(diag(marginal_cov_miss) <= 1e-8) ) {
-                         for(s_idx in 1:S) current_imps[s_idx,] <- means[[g_comp]][idx_miss] 
-                    } else {
-                         current_imps <- mvnfast::rmvn(S, mu = means[[g_comp]][idx_miss], sigma = marginal_cov_miss)
-                    }
-                  }
-                } else { # No observed parts, impute S samples from marginal of component g_comp
-                  marginal_cov_miss <- as.matrix(covs[[g_comp]][idx_miss, idx_miss, drop=FALSE])
-                  if(any(is.na(marginal_cov_miss)) || any(diag(marginal_cov_miss) <= 1e-8) ) {
-                       for(s_idx in 1:S) current_imps[s_idx,] <- means[[g_comp]][idx_miss]
-                  } else {
-                       current_imps <- mvnfast::rmvn(S, mu = means[[g_comp]][idx_miss], sigma = marginal_cov_miss)
-                  }
-                }
-            }
-      
-            # Reconstruct S full data vectors for these S samples
-            reconstructed_s_samples <- matrix(NA, nrow = S, ncol = p)
-            colnames(reconstructed_s_samples) <- colnames(data)
-      
-            if (length(idx_obs) > 0) {
-              reconstructed_s_samples[, idx_obs] <- matrix(rep(y_obs_values, S), nrow = S, byrow = TRUE)
-            }
-            if (length(idx_miss) > 0) {
-              reconstructed_s_samples[, idx_miss] <- current_imps
-            }
-            observation_specific_aug_data_list[[g_comp]] <- reconstructed_s_samples
-      
-            # Weights for these S samples: sparse vector (0, ..., z_ig/S, ..., 0)
-            # gamma_i_for_this_obs[g_comp] is z_ig for this observation and this component g_comp
-            current_s_samples_weights <- matrix(0, nrow = S, ncol = G)
-            if (S > 0) { # Avoid division by zero if S is passed as 0
-                current_s_samples_weights[, g_comp] <- gamma_i_for_this_obs[g_comp] / S 
-            }
-            observation_specific_aug_weights_list[[g_comp]] <- current_s_samples_weights
-          } # End loop over g_comp
-
-          all_aug_data_list[[obs_idx]] <- do.call(rbind, observation_specific_aug_data_list)
-          all_aug_weights_list[[obs_idx]] <- do.call(rbind, observation_specific_aug_weights_list)
-        } # End loop over obs_idx
-
-        aug_data_combined <- do.call(rbind, all_aug_data_list)
-        aug_weights_combined <- do.call(rbind, all_aug_weights_list)
-      } else { # No incomplete data
-        aug_data_combined <- matrix(nrow = 0, ncol = p)
-        # Ensure aug_weights_combined has G columns even if 0 rows
-        aug_weights_combined <- matrix(nrow = 0, ncol = G)
-      }
-
-      # Combine data and weights for complete and augmented incomplete cases
-      full_data <- rbind(split_data$data_comp, aug_data_combined)
-      
-      weights_for_mstep <- matrix(0, nrow = nrow(full_data), ncol = G)
-      if (split_data$n0 > 0) {
-        weights_for_mstep[1:split_data$n0, ] <- resp$gamma0
-      }
-      if (nrow(aug_data_combined) > 0) { # Check if there was any augmented data
-        weights_for_mstep[(split_data$n0 + 1):nrow(full_data), ] <- aug_weights_combined
-      }
-
-      
-      # M-step with mclust
-      mstep_result <- mclust::mstep(data = full_data, modelName = modelName, z = weights_for_mstep)
-      
-      # Update parameters
-      means <- lapply(1:G, function(g) as.numeric(mstep_result$parameters$mean[,g]))
-      covs <- lapply(1:G, function(g) mstep_result$parameters$variance$sigma[,,g])
-      pi <- mstep_result$parameters$pro
-      
-      # Calculate new log-likelihood
-      new_resp <- Responsibility(split_data, means, covs, pi)
-      loglik_new <- 0
-      if(split_data$n0 > 0) {
-        loglik_new <- loglik_new + sum(log(rowSums(new_resp$dens_eval0)))
-      }
-      if(split_data$n1 > 0) {
-        loglik_new <- loglik_new + sum(log(rowSums(new_resp$dens_eval1)))
-      }
-      
-      # Update imputed data for next iteration
-      data_imputed_new <- data_imputed
-      if(split_data$n1 > 0) {
-        incomp_data <- split_data$data_incomp
-        for(i in 1:nrow(incomp_data)) {
-          y <- incomp_data[i,]
-          idx_miss <- which(is.na(y))
-          idx_obs <- which(!is.na(y))
-          
-          gamma_i <- new_resp$gamma1[i,]
-          best_cluster <- which.max(gamma_i)
-          
-          cond_dist <- CalcCondDist(y, idx_miss, idx_obs, means[[best_cluster]], covs[[best_cluster]])
-          imputed_values <- mvnfast::rmvn(1, mu = cond_dist$mu, sigma = cond_dist$sigma)
-          data_imputed_new[split_data$idx_incomp[i], idx_miss] <- imputed_values
-        }
-      }
-      
-      # Store mstep_result for final output
-      me_result <- list(
-        parameters = mstep_result$parameters,
-        loglik = loglik_new
-      )
-    }
-    
-    # Check convergence
-    if (abs(loglik_new - loglik_old)/(1 + abs(loglik_new)) < tol) {
-      converged <- TRUE
-      if (verbose) cat(sprintf("Converged at iteration %d\n", iter))
-      break
-    }
-    
-    # Update for next iteration
-    data_imputed <- data_imputed_new
-    loglik_old <- loglik_new
-  }
-  
-  if (!converged && verbose) {
-    cat("Algorithm did not converge within maximum iterations\n")
-  }
-  
-  # Final imputation
-  if (method == "usual") {
-    final_imputed <- impute_missing_values(data, me_result$parameters, z_current, missing_pattern)
-    final_responsibilities <- z_current
-  } else {
-    # Final MMCEM2 imputation
-    split_data <- PartitionData(data)
-    final_resp <- Responsibility(split_data, means, covs, pi)
-    
-    final_imputed <- data
-    if(split_data$n1 > 0) {
-      incomp_data <- split_data$data_incomp
-      for(i in 1:nrow(incomp_data)) {
-        y <- incomp_data[i,]
-        idx_miss <- which(is.na(y))
-        idx_obs <- which(!is.na(y))
-        
-        gamma_i <- final_resp$gamma1[i,]
-        best_cluster <- which.max(gamma_i)
-        
-        cond_dist <- CalcCondDist(y, idx_miss, idx_obs, means[[best_cluster]], covs[[best_cluster]])
-        imputed_values <- mvnfast::rmvn(1, mu = cond_dist$mu, sigma = cond_dist$sigma)
-        final_imputed[split_data$idx_incomp[i], idx_miss] <- imputed_values
-      }
-    }
-    
-    # Convert final responsibilities to matrix format
-    final_responsibilities <- matrix(0, nrow = n, ncol = G)
-    if(split_data$n0 > 0) {
-      final_responsibilities[split_data$idx_comp, ] <- final_resp$gamma0
-    }
-    if(split_data$n1 > 0) {
-      final_responsibilities[split_data$idx_incomp, ] <- final_resp$gamma1
-    }
-  }
-  
-  return(list(
-    imputed_data = final_imputed,
-    converged = converged,
-    iterations = iter,
-    loglik = loglik_new,
-    parameters = me_result$parameters,
-    responsibilities = final_responsibilities,
-    method = method
-  ))
+    Mu <- t(z_mat) %*% data / n_k
+    return(list(prop      = prop,
+         Mu        = Mu,
+         SigmaCube = sigma0,    
+         Z         = z_mat))}
 }
 
+# Regularization function
+regularize_cov <- function(sigma, epsilon = 1e-8) {
+  eig <- eigen(sigma, symmetric = TRUE, only.values = TRUE)
+  min_eig <- min(eig$values)
+  if (min_eig < epsilon) {
+    ridge <- epsilon - min_eig
+    return(sigma + diag(ridge, nrow(sigma)))
+  }
+  return(sigma)
+}
+
+# Compute observed-data log-likelihood
+compute_observed_loglik <- function(data, params) {
+  loglik <- 0
+  for (i in 1:n) {
+    obs <- !is.na(data[i, ])
+    if (any(obs)) {
+      log_probs <- sapply(1:G, function(g) {
+        mu_g <- params$mean[obs, g]
+        sigma_g <- get_component_covariance(params$variance, g)[obs, obs, drop = FALSE]
+        sigma_g <- regularize_cov(sigma_g)
+        log_dens <- mvtnorm::dmvnorm(
+          data[i, obs], 
+          mean = mu_g, 
+          sigma = sigma_g, 
+          log = TRUE
+        )
+        log(params$pro[g]) + log_dens
+      })
+      max_log <- max(log_probs)
+      loglik <- loglik + max_log + log(sum(exp(log_probs - max_log)))
+    }
+  }
+  return(loglik)
+}
+  
+# Sampling-based imputation function
+impute_with_sampling <- function(data, parameters, z, missing_pattern, 
+                                  n_samples = 100, burn_in_ratio = 0.1) {
+  n <- nrow(data)
+  p <- ncol(data)
+  G <- length(parameters$pro)
+  burn_in <- max(1, floor(n_samples * burn_in_ratio))
+  effective_samples <- n_samples - burn_in
+  
+  # Validate sample counts
+  if (effective_samples < 1) {
+    stop("n_samples too small after burn-in. Increase n_samples or decrease burn_in_ratio.")
+  }
+  
+  # Identify unique missing patterns
+  pattern_str <- apply(missing_pattern, 1, function(x) paste(which(x), collapse = ","))
+  unique_patterns <- unique(pattern_str)
+  
+  data_imputed <- data
+  
+  for (pat in unique_patterns) {
+    pat_indices <- which(pattern_str == pat)
+    if (length(pat_indices) == 0) next
+    
+    obs_indices <- !missing_pattern[pat_indices[1], ]
+    mis_indices <- missing_pattern[pat_indices[1], ]
+    num_missing <- sum(mis_indices)
+    num_obs <- length(pat_indices)
+    
+    if (any(mis_indices)) {
+      if (any(obs_indices)) {
+        imp_vals <- matrix(0, nrow = num_obs, ncol = num_missing)
+        
+        for (i in 1:num_obs) {
+          idx <- pat_indices[i]
+          obs_data <- data[idx, obs_indices]
+          z_i <- z[idx, ]
+          
+          # Clean responsibilities vector
+          z_i[is.na(z_i)] <- 0
+          z_i[z_i < 0] <- 0
+          if (sum(z_i) < .Machine$double.eps) {
+            z_i <- rep(1/G, G)  # Fallback to uniform
+          } else {
+            z_i <- z_i / sum(z_i)  # Normalize
+          }
+          
+          # Identify valid components
+          valid_g <- which(z_i > 1e-6)
+          if (length(valid_g) == 0) valid_g <- 1:G
+          
+          # Draw samples
+          all_samples <- matrix(0, nrow = n_samples, ncol = num_missing)
+          for (s in 1:n_samples) {
+            # Sample component safely
+            g <- if (length(valid_g) == 1) {
+              valid_g
+            } else {
+              sample(valid_g, 1, prob = z_i[valid_g])
+            }
+            
+            mu_g <- parameters$mean[, g]
+            sigma_g <- get_component_covariance(parameters$variance, g)
+            
+            mu_obs <- mu_g[obs_indices]
+            mu_miss <- mu_g[mis_indices]
+            sigma_obs_obs <- sigma_g[obs_indices, obs_indices, drop = FALSE]
+            sigma_miss_obs <- sigma_g[mis_indices, obs_indices, drop = FALSE]
+            sigma_miss_miss <- sigma_g[mis_indices, mis_indices, drop = FALSE]
+            
+            # Regularize and compute conditional distribution
+            sigma_obs_obs <- regularize_cov(sigma_obs_obs)
+            sigma_obs_inv <- solve(sigma_obs_obs)
+            
+            cond_mean <- mu_miss + sigma_miss_obs %*% sigma_obs_inv %*% (obs_data - mu_obs)
+            cond_cov <- sigma_miss_miss - sigma_miss_obs %*% sigma_obs_inv %*% t(sigma_miss_obs)
+            cond_cov <- regularize_cov(cond_cov)
+            
+            # Draw sample safely
+            all_samples[s, ] <- tryCatch(
+              mvtnorm::rmvnorm(1, cond_mean, cond_cov),
+              error = function(e) cond_mean  # Fallback to mean
+            )
+          }
+          
+          # Apply burn-in and compute robust estimate
+          post_burn_samples <- all_samples[(burn_in + 1):n_samples, , drop = FALSE]
+          imp_vals[i, ] <- apply(post_burn_samples, 2, median)
+        }
+        data_imputed[pat_indices, mis_indices] <- imp_vals
+      } else {
+        # Completely missing rows
+        marg_mean <- rowSums(parameters$mean %*% diag(parameters$pro))
+        data_imputed[pat_indices, mis_indices] <- matrix(
+          marg_mean[mis_indices], 
+          nrow = num_obs, 
+          ncol = num_missing, 
+          byrow = TRUE
+        )
+      }
+    }
+  }
+  return(data_imputed)
+}
+
+# Conditional mean imputation function
 impute_missing_values <- function(data, parameters, z, missing_pattern) {
   n <- nrow(data)
   p <- ncol(data)
   G <- length(parameters$pro)
-  
   data_imputed <- data
   
-  for (i in 1:n) {
-    missing_i <- missing_pattern[i, ]
+  # Identify unique missing patterns
+  pattern_str <- apply(missing_pattern, 1, function(x) paste(which(x), collapse = ","))
+  unique_patterns <- unique(pattern_str)
+  
+  for (pat in unique_patterns) {
+    pat_indices <- which(pattern_str == pat)
+    obs_indices <- !missing_pattern[pat_indices[1], ]
+    mis_indices <- missing_pattern[pat_indices[1], ]
+    num_missing <- sum(mis_indices)
+    num_obs <- length(pat_indices)
     
-    if (any(missing_i)) {
-      # Get observed values for this obs
-      obs_i <- !missing_i
-      
-      if (any(obs_i)) {
-        # Conditional imputation based on observed values
-        imputed_values <- conditional_imputation(
-          obs_values = data[i, obs_i],
-          obs_indices = which(obs_i),
-          miss_indices = which(missing_i),
-          parameters = parameters,
-          z_i = z[i, ]
-        )
+    if (any(mis_indices)) {
+      if (any(obs_indices)) {
+        # Batch impute for all observations with same pattern
+        imp_vals <- matrix(0, nrow = num_obs, ncol = num_missing)
+        obs_data <- data[pat_indices, obs_indices, drop = FALSE]
         
-        data_imputed[i, missing_i] <- imputed_values
+        for (g in 1:G) {
+          # Only process components with significant responsibility
+          comp_responsibilities <- z[pat_indices, g]
+          if (max(comp_responsibilities) > 1e-3) {
+            mu_g <- parameters$mean[, g]
+            sigma_g <- get_component_covariance(parameters$variance, g)
+            
+            mu_obs <- mu_g[obs_indices]
+            mu_miss <- mu_g[mis_indices]
+            sigma_obs_obs <- sigma_g[obs_indices, obs_indices, drop = FALSE]
+            sigma_miss_obs <- sigma_g[mis_indices, obs_indices, drop = FALSE]
+            
+            # Regularize
+            sigma_obs_obs <- regularize_cov(sigma_obs_obs)
+            sigma_obs_inv <- solve(sigma_obs_obs)
+            
+            # Compute conditional means
+            obs_diff <- t(t(obs_data) - mu_obs)
+            cond_mean <- mu_miss + 
+              (sigma_miss_obs %*% sigma_obs_inv) %*% 
+              t(obs_diff)
+            
+            # Weight by responsibilities
+            weights <- matrix(comp_responsibilities, nrow = num_obs, ncol = num_missing)
+            weighted_cond <- t(cond_mean) * weights
+            
+            imp_vals <- imp_vals + weighted_cond
+          }
+        }
+        data_imputed[pat_indices, mis_indices] <- imp_vals
       } else {
-        marginal_mean <- compute_marginal_mean(parameters)
-        data_imputed[i, missing_i] <- marginal_mean[missing_i]
+        # Completely missing rows
+        marg_mean <- rowSums(parameters$mean %*% diag(parameters$pro))
+        data_imputed[pat_indices, mis_indices] <- matrix(
+          marg_mean[mis_indices], 
+          nrow = num_obs, 
+          ncol = num_missing, 
+          byrow = TRUE
+        )
       }
     }
   }
-  
   return(data_imputed)
 }
 
@@ -633,6 +930,81 @@ conditional_imputation <- function(obs_values, obs_indices, miss_indices, parame
   }
   
   return(imputed_values)
+}
+
+resp_to_full_data <- function(init_result, data_imputed, complete_cases, G) {
+  n_full <- nrow(data_imputed)
+  z_full <- matrix(0, nrow = n_full, ncol = G)
+
+  z_full[complete_cases, ] <- init_result$Z
+
+  incomplete_cases <- !complete_cases
+  
+  if (any(incomplete_cases)) {
+    temp_params <- list(
+      pro = init_result$prop,
+      mean = init_result$Mu,
+      variance = list(
+        modelName = "VVV",  
+        d = ncol(data_imputed),
+        G = G,
+        sigma = init_result$SigmaCube
+      )
+    )
+    
+    incomplete_indices <- which(incomplete_cases)
+    N_incomplete <- length(incomplete_indices)
+    
+    dens <- matrix(NA, N_incomplete, G)
+    
+    for (k in 1:G) {
+      mu_k <- temp_params$mean[, k]
+      sigma_k <- temp_params$variance$sigma[, , k]
+      epsilon_pd <- sqrt(.Machine$double.eps)
+    
+      eigv <- eigen(sigma_k, symmetric = TRUE, only.values = TRUE)$values
+      if (min(eigv) <= epsilon_pd) {
+        ridge <- max(0, -min(eigv)) + epsilon_pd
+        sigma_k <- sigma_k + diag(ridge, ncol(sigma_k))
+      }
+    
+      for (idx in 1:N_incomplete) {
+        i <- incomplete_indices[idx]
+        dens[idx, k] <- mvtnorm::dmvnorm(data_imputed[i, ], 
+                                        mean = mu_k, 
+                                        sigma = sigma_k, 
+                                        log = TRUE)
+      }
+    }
+  
+    denspro <- sweep(dens, 2, log(temp_params$pro), "+")
+    
+    z_max <- apply(denspro, 1, max)
+    
+    log_sum_exp <- z_max + log(rowSums(exp(denspro - z_max)))
+    z_incomplete <- exp(denspro - log_sum_exp)
+    
+    for (idx in 1:N_incomplete) {
+      if (any(is.na(z_incomplete[idx, ])) || sum(z_incomplete[idx, ]) == 0) {
+        z_incomplete[idx, ] <- rep(1/G, G)
+      }
+    }
+    z_full[incomplete_indices, ] <- z_incomplete
+  }
+  
+  return(z_full)
+}
+
+compute_marginal_mean <- function(parameters) {
+  G <- length(parameters$pro)
+  p <- nrow(parameters$mean)
+  
+  marginal_mean <- numeric(p)
+  for (g in 1:G) {
+    marginal_mean <- marginal_mean + parameters$pro[g] * parameters$mean[, g]
+  }
+  
+  return(marginal_mean)
 }
 
 get_component_covariance <- function(variance_struct, g) {
@@ -856,81 +1228,6 @@ get_component_covariance <- function(variance_struct, g) {
   }
   stop(paste("Unsupported or unrecognized modelName '", modelName, 
              "' or variance structure not correctly specified for reconstruction after checking all known model types.", sep=""))
-}
-
-resp_to_full_data <- function(init_result, data_imputed, complete_cases, G) {
-  n_full <- nrow(data_imputed)
-  z_full <- matrix(0, nrow = n_full, ncol = G)
-
-  z_full[complete_cases, ] <- init_result$Z
-
-  incomplete_cases <- !complete_cases
-  
-  if (any(incomplete_cases)) {
-    temp_params <- list(
-      pro = init_result$prop,
-      mean = init_result$Mu,
-      variance = list(
-        modelName = "VVV",  
-        d = ncol(data_imputed),
-        G = G,
-        sigma = init_result$SigmaCube
-      )
-    )
-    
-    incomplete_indices <- which(incomplete_cases)
-    N_incomplete <- length(incomplete_indices)
-    
-    dens <- matrix(NA, N_incomplete, G)
-    
-    for (k in 1:G) {
-      mu_k <- temp_params$mean[, k]
-      sigma_k <- temp_params$variance$sigma[, , k]
-      epsilon_pd <- sqrt(.Machine$double.eps)
-    
-      eigv <- eigen(sigma_k, symmetric = TRUE, only.values = TRUE)$values
-      if (min(eigv) <= epsilon_pd) {
-        ridge <- max(0, -min(eigv)) + epsilon_pd
-        sigma_k <- sigma_k + diag(ridge, ncol(sigma_k))
-      }
-    
-      for (idx in 1:N_incomplete) {
-        i <- incomplete_indices[idx]
-        dens[idx, k] <- mvtnorm::dmvnorm(data_imputed[i, ], 
-                                        mean = mu_k, 
-                                        sigma = sigma_k, 
-                                        log = TRUE)
-      }
-    }
-  
-    denspro <- sweep(dens, 2, log(temp_params$pro), "+")
-    
-    z_max <- apply(denspro, 1, max)
-    
-    log_sum_exp <- z_max + log(rowSums(exp(denspro - z_max)))
-    z_incomplete <- exp(denspro - log_sum_exp)
-    
-    for (idx in 1:N_incomplete) {
-      if (any(is.na(z_incomplete[idx, ])) || sum(z_incomplete[idx, ]) == 0) {
-        z_incomplete[idx, ] <- rep(1/G, G)
-      }
-    }
-    z_full[incomplete_indices, ] <- z_incomplete
-  }
-  
-  return(z_full)
-}
-
-compute_marginal_mean <- function(parameters) {
-  G <- length(parameters$pro)
-  p <- nrow(parameters$mean)
-  
-  marginal_mean <- numeric(p)
-  for (g in 1:G) {
-    marginal_mean <- marginal_mean + parameters$pro[g] * parameters$mean[, g]
-  }
-  
-  return(marginal_mean)
 }
 
 map_mixall_to_mclust <- function(mixall_model) {
