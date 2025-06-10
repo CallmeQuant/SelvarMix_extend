@@ -9,7 +9,7 @@ EM_impute <- function(data,
                      verbose = FALSE,
                      use_glasso = FALSE,     
                      lambda_omega_0 = 50,     
-                     n_samples = 100,           
+                     n_samples = 50,           
                      burn_in_ratio = 0.1) {      
   
   # Validate method parameter
