@@ -303,17 +303,11 @@ SelvarClustLasso <- function(
                                           modelName = model_name,
                                           max_iter = mnarz_control$rmax,
                                           init_method = mnarz_control$initialize,
-<<<<<<< HEAD
                                           use_glasso = mnarz_control$use_glasso,
                                           lambda_omega_0 = mnarz_control$lambda_omega_0,
                                           sampling   = mnarz_control$sampling,
                                           n_samples = mnarz_control$n_samples,
                                           tol = 1e-6,
-=======
-                                          tol = 1e-6,
-                                          use_glasso = mnarz_control$use_glasso,
-                                          lambda_omega_0 = mnarz_control$lambda_omega_0,
->>>>>>> de66d98f1fceb66918202a56cf9b952b5e4642d0
                                           verbose = FALSE
                                       )
         }, error = function(e) {
