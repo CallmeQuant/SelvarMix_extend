@@ -31,17 +31,6 @@ EM_impute <- function(data,
     ))
   }
   
-  # Create regularization wrapper for covariance matrices
-  regularize_cov <- function(sigma, epsilon = sqrt(.Machine$double.eps)) {
-    eig <- eigen(sigma, symmetric = TRUE, only.values = TRUE)
-    min_eig <- min(eig$values)
-    if (min_eig < epsilon) {
-      ridge <- epsilon - min_eig
-      return(sigma + diag(ridge, nrow(sigma)))
-    }
-    return(sigma)
-  }
-  
   # Compute observed-data log-likelihood
   compute_observed_loglik <- function(data, params) {
     loglik <- 0
@@ -209,6 +198,16 @@ EM_impute <- function(data,
     parameters = me_result$parameters,
     responsibilities = z_current
   ))
+}
+
+regularize_cov <- function(sigma, epsilon = sqrt(.Machine$double.eps)) {
+  eig <- eigen(sigma, symmetric = TRUE, only.values = TRUE)
+  min_eig <- min(eig$values)
+  if (min_eig < epsilon) {
+    ridge <- epsilon - min_eig
+    return(sigma + diag(ridge, nrow(sigma)))
+  }
+  return(sigma)
 }
 
 impute_missing_values <- function(data, parameters, z, missing_pattern) {
