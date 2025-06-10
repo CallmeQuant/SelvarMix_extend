@@ -4,11 +4,21 @@ EM_impute <- function(data,
                      max_iter = 1000,
                      tol = 1e-6,
                      init_method = "hc",
+<<<<<<< HEAD
                      use_glasso = FALSE,
                      lambda_omega_0 = 50,
                      sampling=FALSE,
                      n_samples = 100,
                      verbose = FALSE) {
+=======
+                     method = "usual", 
+                     S = 50, 
+                     verbose = FALSE,
+                     use_glasso = FALSE,     
+                     lambda_omega_0 = 50,     
+                     n_samples = 50,           
+                     burn_in_ratio = 0.1) {      
+>>>>>>> de66d98f1fceb66918202a56cf9b952b5e4642d0
   
   # Validate inputs
   if (!is.data.frame(data) && !is.matrix(data)) {
