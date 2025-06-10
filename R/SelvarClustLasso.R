@@ -112,19 +112,11 @@ SelvarClustLasso <- function(
     rmax      = 100,
     tol       = 1e-4,
     init      = NULL,
-<<<<<<< HEAD
     initialize = "hc",
     use_glasso = FALSE,
     lambda_omega_0 = 50,
     sampling=FALSE,
-    n_samples = 100,
-=======
-    method    = "usual",
-    S         = 250,
-    initialize = "hc",
-    use_glasso = FALSE,
-    lambda_omega_0 = 50
->>>>>>> de66d98f1fceb66918202a56cf9b952b5e4642d0
+    n_samples = 100
   )
   mnarz_control <- utils::modifyList(.mnarz_defaults, mnarz_control)
 
