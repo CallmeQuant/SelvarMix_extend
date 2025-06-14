@@ -34,12 +34,13 @@ class CritClust {
   NumericMatrix data;        // data matrix
   IntegerVector knownlabels; // labels for supervised classification
   bool DA;  
+  // Enviroment model_map_env; // Environment for model mapping
   
 public:
   // Constructors
   CritClust();
   CritClust(int k, string framework, string model_name, NumericMatrix data, string crit, IntegerVector knownlabels, bool DA);
-  
+  // CritClust(int k, string framework, string model_name, NumericMatrix data, string crit, IntegerVector knownlabels, bool DA, Environment model_map_env);
   // Method
   List ClustBestModel(vector<int> numExp);
 };

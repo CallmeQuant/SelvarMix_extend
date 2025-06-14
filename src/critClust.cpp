@@ -6,6 +6,7 @@ CritClust::CritClust() {}
 
 CritClust::CritClust(int k, std::string framework, std::string model_name, NumericMatrix data, 
                      std::string crit, IntegerVector knownlabels, bool DA)
+
 {
     this->crit = crit;
     this->framework = framework;
@@ -14,6 +15,7 @@ CritClust::CritClust(int k, std::string framework, std::string model_name, Numer
     this->data = data;
     this->knownlabels = knownlabels;
     this->DA = DA;
+
 }
 
 List CritClust::ClustBestModel(std::vector<int> numExp)
@@ -134,7 +136,23 @@ List CritClust::ClustBestModel(std::vector<int> numExp)
             Function RmixmodCluster = Rmixmod["mixmodCluster"];
             Function RmixmodStrategy = Rmixmod["mixmodStrategy"];
             Function RmixmodGaussianModel = Rmixmod["mixmodGaussianModel"];
-            
+            // Environment rmm_map = as<Environment>(model_map_env["Rmixmod"]);
+            // RObject model_spec;
+
+            // if (rmm_map.exists(model_name)) {
+            //     model_spec = rmm_map.get(model_name);
+            // } else {
+            //     CharacterVector valid_families = CharacterVector::create("all", "spherical", "diagonal", "general");
+            //     if (std::find(valid_families.begin(), valid_families.end(), model_name) != valid_families.end()) {
+            //         Function RmixmodGaussianModel = Rmixmod["mixmodGaussianModel"];
+            //         model_spec = RmixmodGaussianModel(Named("family") = model_name);
+            //     } else {
+            //         Rcerr << "Warning: Model '" << model_name << "' not found. Using default 'all'.\n";
+            //         model_spec = rmm_map.get("all");
+            //     }
+            // }
+
+            // modelObject = model_spec;
             // Parse the model string to create a model object
             SEXP modelObject;
             try {

@@ -538,447 +538,232 @@ convert_mclust_to_lists <- function(parameters) {
   return(list(means = means, covs = covs, pi = pi))
 }
 
-get_component_covariance <- function(variance_struct, g) {
-  # Ensure variance_struct is not NULL and is a list
-  if (is.null(variance_struct) || !is.list(variance_struct)) {
-    stop("variance_struct is NULL or not a list.")
+map_to_mclust <- function(model_name, package_source = NULL) {
+  if (toupper(model_name) %in% c("EII", "VII", "EEI", "VEI", "EVI", "VVI", 
+                                 "EEE", "EVE", "VEE", "EEV", "VEV", "EVV", "VVV")) {
+    return(toupper(model_name))
   }
+  
+  # Convert to lowercase for case-insensitive
+  model_lower <- tolower(model_name)
+  
+  # MixAll model mapping
+  mixall_mapping <- list(
+    "gaussian_pk_sjk" = "VVI",
+    "gaussian_pk_sj" = "VII",
+    "gaussian_pk_sk" = "VEI",
+    "gaussian_pk_s" = "EII",
+    "gaussian_p_sjk" = "EVI",
+    "gaussian_p_sj" = "VII",
+    "gaussian_p_sk" = "EEI",
+    "gaussian_p_s" = "EII"
+  )
+  
+  # Rmixmod model mapping
+  rmixmod_mapping <- list(
+    "gaussian_p_l_i" = "EII",
+    "gaussian_p_lk_i" = "VII",
+    "gaussian_p_l_b" = "EEE",
+    "gaussian_p_lk_b" = "VEE",
+    "gaussian_p_l_bk" = "EEV",
+    "gaussian_p_lk_bk" = "VEV",
+    "gaussian_p_l_c" = "EVI",
+    "gaussian_p_lk_c" = "VVI",
+    "gaussian_p_l_d_ak_d" = "EEI",
+    "gaussian_p_lk_d_ak_d" = "VEI",
+    "gaussian_p_l_dk_a_dk" = "EVE",
+    "gaussian_p_lk_dk_a_dk" = "VVE",
+    "gaussian_p_l_dk_ak_dk" = "EVV",
+    "gaussian_p_lk_dk_ak_dk" = "VVV",
+    "gaussian_pk_l_i" = "EII",
+    "gaussian_pk_lk_i" = "VII",
+    "gaussian_pk_l_b" = "EEE",
+    "gaussian_pk_lk_b" = "VEE",
+    "gaussian_pk_l_bk" = "EEV",
+    "gaussian_pk_lk_bk" = "VEV",
+    "gaussian_pk_l_c" = "EVI",
+    "gaussian_pk_lk_c" = "VVI",
+    "gaussian_pk_l_d_ak_d" = "EEI",
+    "gaussian_pk_lk_d_ak_d" = "VEI",
+    "gaussian_pk_l_dk_a_dk" = "EVE",
+    "gaussian_pk_lk_dk_a_dk" = "VVE",
+    "gaussian_pk_l_dk_ak_dk" = "EVV",
+    "gaussian_pk_lk_dk_ak_dk" = "VVV"
+  )
+  
+  # Try MixAll mapping
+  if (model_lower %in% names(mixall_mapping)) {
+    return(mixall_mapping[[model_lower]])
+  }
+  
+  # Try Rmixmod mapping
+  if (model_lower %in% names(rmixmod_mapping)) {
+    return(rmixmod_mapping[[model_lower]])
+  }
+  
+  patterns <- list(
+    c("pk_sjk", "VVI"), c("pk_sj", "VII"), c("pk_sk", "VEI"), 
+    c("pk_s$", "EII"), c("p_sjk", "EVI"), c("p_sj", "VII"), 
+    c("p_sk", "EEI"), c("p_s$", "EII"), c("lk_c$", "VVI"), 
+    c("l_i$", "EII"), c("lk_i$", "VII"), c("l_b$", "EEE"),
+    c("lk_b$", "VEE"), c("l_c$", "EVI"), c("lk_dk_ak_dk$", "VVV"),
+    c("l_dk_ak_dk$", "VVV")  # Added pattern for "l_dk_ak_dk"
+  )
+  
+  for (p in patterns) {
+    if (grepl(p[1], model_lower, ignore.case = TRUE)) {
+      return(p[2])
+    }
+  }
+  
+  # Default to VVV
+  warning(paste("Unknown model name:", model_name, "- using VVV as default"))
+  return("VVV")
+}
 
-  # Ensure modelName, d (dimension), and G (num components) are present and valid
-  if (is.null(variance_struct$modelName) || !is.character(variance_struct$modelName) || length(variance_struct$modelName) != 1) {
-    stop("variance_struct must contain a single string 'modelName'.")
-  }
-  if (is.null(variance_struct$d) || !is.numeric(variance_struct$d) || length(variance_struct$d) != 1 || variance_struct$d < 0 || floor(variance_struct$d) != variance_struct$d) {
-    stop("variance_struct must contain 'd' (dimension) as a single non-negative integer.")
-  }
-  # G=0 is not typical for a fitted model's parameters. If it occurs, it implies no components.
-  # If G=0, then g cannot be valid.
-  if (is.null(variance_struct$G) || !is.numeric(variance_struct$G) || length(variance_struct$G) != 1 || variance_struct$G < 1 || floor(variance_struct$G) != variance_struct$G) {
-    stop("variance_struct must contain 'G' (number of components) as a single positive integer.")
-  }
+get_component_covariance <- function(variance_struct, g) {
+  if (!is.list(variance_struct)) stop("variance_struct must be a list")
   
   modelName <- variance_struct$modelName
   d <- variance_struct$d
   G <- variance_struct$G
-
-  # Validate g (g > G is now safe as G is confirmed to be a positive integer)
-  if (!is.numeric(g) || length(g) != 1 || g < 1 || g > G ) { 
-    stop(paste("Invalid component index 'g'=", g, ". Must be an integer between 1 and G (", G, ").", sep=""))
+  
+  if (is.null(modelName) || !is.character(modelName) || length(modelName) != 1) 
+    stop("Missing or invalid modelName")
+  if (is.null(d) || d < 1 || d != as.integer(d)) 
+    stop("Invalid dimension d")
+  if (is.null(G) || G < 1 || G != as.integer(G)) 
+    stop("Invalid component count G")
+  if (g < 1 || g > G) 
+    stop("Component index g out of range")
+  
+  if (!is.null(variance_struct$sigma) && 
+      is.array(variance_struct$sigma) &&
+      length(dim(variance_struct$sigma)) == 3) {
+    dims <- dim(variance_struct$sigma)
+    if (dims[1] == d && dims[2] == d && dims[3] >= g) {
+      return(variance_struct$sigma[,,g])
+    }
   }
-
-  # --- Univariate Models ---
+  
+  # univariate models
   if (d == 1) {
-    if (modelName == "E") { # Equal variance
-      if (!is.null(variance_struct$sigmasq) && is.numeric(variance_struct$sigmasq) && length(variance_struct$sigmasq) == 1) {
+    if (modelName %in% c("E", "EII", "EEI")) {
+      if (length(variance_struct$sigmasq) == 1) 
         return(matrix(variance_struct$sigmasq))
-      } else {
-        stop("For univariate 'E' model, variance_struct$sigmasq should be a single numeric value.")
-      }
     }
-    if (modelName == "V") { # Variable variance
-      if (!is.null(variance_struct$sigmasq) && is.numeric(variance_struct$sigmasq) && length(variance_struct$sigmasq) == G) {
+    else if (modelName %in% c("V", "VII", "VVI")) {
+      if (length(variance_struct$sigmasq) >= g) 
         return(matrix(variance_struct$sigmasq[g]))
-      } else {
-        stop(paste("For univariate 'V' model, variance_struct$sigmasq should be a numeric vector of length G (",G,").",sep=""))
-      }
     }
-    # If d=1 but modelName is a multivariate one, it will fall through. 
-    # This is generally okay as mclust would fit "E" or "V" for d=1.
-    # If a multivariate model name is forced on d=1 data, the following sections should handle it if d=1.
-  }
-
-  # --- Multivariate Models ---
-
-  # Spherical models: Sigma_k = lambda_k * I
-  if (modelName == "EII") { # Spherical, equal volume (lambda * I)
-    if (!is.null(variance_struct$sigmasq) && is.numeric(variance_struct$sigmasq) && length(variance_struct$sigmasq) == 1) {
-      return(diag(x = variance_struct$sigmasq, nrow = d, ncol = d))
-    } else {
-      stop("For 'EII' model, variance_struct$sigmasq should be a single numeric value.")
-    }
-  }
-  if (modelName == "VII") { # Spherical, unequal volume (lambda_k * I)
-    if (!is.null(variance_struct$sigmasq) && is.numeric(variance_struct$sigmasq) && length(variance_struct$sigmasq) == G) {
-      return(diag(x = variance_struct$sigmasq[g], nrow = d, ncol = d))
-    } else {
-      stop(paste("For 'VII' model, variance_struct$sigmasq should be a numeric vector of length G (",G,").",sep=""))
-    }
+    stop("Univariate model parameters incomplete")
   }
   
-  if (modelName %in% c("EEI", "VEI", "EVI", "VVI")) {
-    # Path 1: Use variance_struct$sigma directly (preferred for diagonal models)
-    # According to mclust documentation, variance_struct$sigma is a (d x d x G) array for these.
-    if (!is.null(variance_struct$sigma) && is.array(variance_struct$sigma) && 
-        length(dim(variance_struct$sigma)) == 3 &&
-        dim(variance_struct$sigma)[1] == d && dim(variance_struct$sigma)[2] == d && dim(variance_struct$sigma)[3] == G) {
-      return(variance_struct$sigma[,,g, drop = FALSE])
-    } else if (modelName == "EEI" && !is.null(variance_struct$Sigma) && is.matrix(variance_struct$Sigma) && 
-               all(dim(variance_struct$Sigma) == c(d,d))) {
-      # Path 1b: EEI might store a single common covariance matrix variance_struct$Sigma
-       return(variance_struct$Sigma)
-    } else if (!is.null(variance_struct$scale) && !is.null(variance_struct$shape)) {
-        # Path 2: Fallback to reconstruction from scale and shape if sigma array is not as expected.
-        # This path is less common for these models if mclust output is standard.
-        
-        current_scale_val <- NA # Renamed from current_scale to avoid conflict with base::scale
-        if (length(variance_struct$scale) == 1) { # Common scale (E models like EEI, EVI)
-            current_scale_val <- variance_struct$scale
-        } else if (length(variance_struct$scale) == G) { # Varying scale (V models like VEI, VVI)
-            current_scale_val <- variance_struct$scale[g]
-        } else {
-            stop(paste("For diagonal model", modelName, ", 'scale' has unexpected length. Expected 1 or G (",G,"). Actual:", length(variance_struct$scale)))
-        }
-
-        current_shape_diag_elements <- NULL
-        if (is.vector(variance_struct$shape) && length(variance_struct$shape) == d) { # Common shape (E models like EEI, VEI)
-            current_shape_diag_elements <- variance_struct$shape
-        } else if (is.matrix(variance_struct$shape) && nrow(variance_struct$shape) == d && ncol(variance_struct$shape) == G) { # Varying shape (V models like EVI, VVI)
-            current_shape_diag_elements <- variance_struct$shape[,g]
-        } else {
-            stop(paste("For diagonal model", modelName, ", 'shape' has unexpected dimensions. Expected vector of length d (",d,") or d x G matrix (",d,"x",G,"). Actual dims:", paste(dim(variance_struct$shape),collapse="x"), "or length:", length(variance_struct$shape)))
-        }
-        
-        # The elements of 'shape' are normalized such that prod(shape[,k]) = 1 (for d>0).
-        # The diagonal elements of Sigma_k are lambda_k * shape_elements_k,
-        # where lambda_k is variance_struct$scale[k]^d (volume).
-        lambda_k_volume <- current_scale_val^d
-        if (d == 0 && current_scale_val == 0) lambda_k_volume <- 0 
-        else if (d == 0 && current_scale_val != 0) lambda_k_volume <- 1
-
-        diag_elements <- lambda_k_volume * current_shape_diag_elements
-        return(diag(diag_elements, nrow = d, ncol = d))
-    } else {
-      stop(paste("For diagonal model '", modelName, "', expected variance_struct$sigma (dxdxG array), or variance_struct$Sigma (dxd matrix for EEI), or variance_struct$scale & shape were not found or structured as expected.", sep=""))
-    }
-  }
-
-  # EEE: Sigma_k = Sigma (common volume, shape, orientation)
-  if (modelName == "EEE") {
-    if (!is.null(variance_struct$Sigma) && is.matrix(variance_struct$Sigma) && all(dim(variance_struct$Sigma) == c(d,d))) {
-      return(variance_struct$Sigma)
-    } else if (!is.null(variance_struct$cholSigma) && is.matrix(variance_struct$cholSigma) && all(dim(variance_struct$cholSigma) == c(d,d))) {
-      return(crossprod(variance_struct$cholSigma))
-    } else {
-      stop("For 'EEE' model, variance_struct$Sigma (d x d matrix) or variance_struct$cholSigma was not found or structured as expected.")
-    }
-  }
-
-  # VVV: Sigma_k = lambda_k * D_k * A_k * D_k^T (varying volume, shape, orientation)
-  # mclust stores these directly in variance_struct$sigma[,,g]
-  if (modelName == "VVV") {
-    if (!is.null(variance_struct$sigma) && is.array(variance_struct$sigma) && 
-        length(dim(variance_struct$sigma)) == 3 &&
-        dim(variance_struct$sigma)[1] == d && dim(variance_struct$sigma)[2] == d && dim(variance_struct$sigma)[3] == G) {
-      return(variance_struct$sigma[,,g, drop = FALSE])
-    } else if (!is.null(variance_struct$cholsigma) && is.array(variance_struct$cholsigma) &&
-               length(dim(variance_struct$cholsigma)) == 3 &&
-               dim(variance_struct$cholsigma)[1] == d && dim(variance_struct$cholsigma)[2] == d && dim(variance_struct$cholsigma)[3] == G) {
-      return(crossprod(variance_struct$cholsigma[,,g, drop = FALSE]))
-    } else {
-      stop(paste("For 'VVV' model, variance_struct$sigma (dxdxG array) or variance_struct$cholsigma (dxdxG array) was not found or structured as expected. Dims of sigma:", paste(dim(variance_struct$sigma), collapse="x")))
-    }
-  }
-  
-  # Models requiring reconstruction from scale, shape, and orientation: EEV, EVE, EVV, VEE, VEV, VVE
-  # These models have specific combinations of equal/varying scale, shape, orientation.
-  
-  current_scale_val <- NA
-  # Determine scale for component g
-  if (modelName %in% c("EEV", "EVE", "EVV")) { # Equal volume
-    if (!is.null(variance_struct$scale) && is.numeric(variance_struct$scale) && length(variance_struct$scale) == 1) {
-      current_scale_val <- variance_struct$scale
-    } else {
-      stop(paste("For model '", modelName, "', variance_struct$scale should be a single numeric value (equal volume). Found length:", length(variance_struct$scale)))
-    }
-  } else if (modelName %in% c("VEE", "VEV", "VVE")) { # Varying volume
-    if (!is.null(variance_struct$scale) && is.numeric(variance_struct$scale) && length(variance_struct$scale) == G) {
-      current_scale_val <- variance_struct$scale[g]
-    } else {
-      stop(paste("For model '", modelName, "', variance_struct$scale should be a numeric vector of length G (",G,"). Found length:", length(variance_struct$scale)))
-    }
-  } else {
-    # This block should only be reached if modelName is one of EEV, EVE, EVV, VEE, VEV, VVE
-    # but the scale was not assigned, which implies a logic error or unhandled model.
-    # However, the previous specific model blocks (EII, VII, EEI..., EEE, VVV) should catch most models.
-    # This path is for the remaining ellipsoidal models.
-  }
-
-  current_shape_matrix <- NULL
-  # Determine shape matrix (diag of normalized eigenvalues) for component g
-  if (modelName %in% c("EVE", "VEE")) { # Equal shape
-    if (!is.null(variance_struct$shape) && is.numeric(variance_struct$shape) && length(variance_struct$shape) == d) {
-      if(d > 0 && abs(prod(variance_struct$shape) - 1) > 1e-6) warning(paste("Product of shape eigenvalues for model", modelName, "is not 1. Product:", prod(variance_struct$shape)))
-      current_shape_matrix <- diag(variance_struct$shape, nrow = d, ncol = d)
-    } else {
-      stop(paste("For model '", modelName, "', variance_struct$shape should be a numeric vector of length d (",d,") (equal shape). Found length:", length(variance_struct$shape)))
-    }
-  } else if (modelName %in% c("EEV", "VEV", "EVV", "VVE")) { # Varying shape
-     if (!is.null(variance_struct$shape) && is.matrix(variance_struct$shape) && 
-        nrow(variance_struct$shape) == d && ncol(variance_struct$shape) == G) {
-      if(d > 0 && abs(prod(variance_struct$shape[,g]) - 1) > 1e-6) warning(paste("Product of shape eigenvalues for model", modelName, "component", g, "is not 1. Product:", prod(variance_struct$shape[,g])))
-      current_shape_matrix <- diag(variance_struct$shape[,g], nrow = d, ncol = d)
-    } else {
-      stop(paste("For model '", modelName, "', variance_struct$shape should be a d x G matrix (d=",d,", G=",G,"). Actual dims:", paste(dim(variance_struct$shape), collapse="x")))
-    }
-  }
-
-  current_orientation_matrix <- NULL
-  # Determine orientation matrix for component g
-  if (modelName %in% c("EEV", "VEE")) { # Equal orientation
-    if (!is.null(variance_struct$orientation) && is.matrix(variance_struct$orientation) && 
-        all(dim(variance_struct$orientation) == c(d,d))) {
-      current_orientation_matrix <- variance_struct$orientation
-    } else {
-      stop(paste("For model '", modelName, "', variance_struct$orientation should be a d x d matrix (equal orientation). Actual dims:", paste(dim(variance_struct$orientation), collapse="x")))
-    }
-  } else if (modelName %in% c("EVE", "VEV", "EVV", "VVE")) { # Varying orientation
-    if (!is.null(variance_struct$orientation) && is.array(variance_struct$orientation) &&
-        length(dim(variance_struct$orientation)) == 3 &&
-        dim(variance_struct$orientation)[1] == d && dim(variance_struct$orientation)[2] == d && 
-        dim(variance_struct$orientation)[3] == G) {
-      current_orientation_matrix <- variance_struct$orientation[,,g, drop = FALSE]
-    } else {
-      stop(paste("For model '", modelName, "', variance_struct$orientation should be a d x d x G array (d=",d,", G=",G,"). Actual dims:", paste(dim(variance_struct$orientation), collapse="x")))
-    }
-  }
-  
-  # Reconstruct covariance if all parts for ellipsoidal models (EEV, EVE, EVV, VEE, VEV, VVE) are found
-  if (!is.na(current_scale_val) && !is.null(current_shape_matrix) && !is.null(current_orientation_matrix)) {
-    lambda_k_volume <- current_scale_val^d
-    if (d == 0 && current_scale_val == 0) lambda_k_volume <- 0 
-    else if (d == 0 && current_scale_val != 0) lambda_k_volume <- 1 
-
-    if (d > 0) {
-      # Sigma_k = D_k * (lambda_k * A_k) * D_k^T
-      # where lambda_k is volume, D_k is orientation, A_k is diagonal matrix of normalized eigenvalues (shape)
-      cov_matrix <- current_orientation_matrix %*% (lambda_k_volume * current_shape_matrix) %*% t(current_orientation_matrix)
-      return(cov_matrix)
-    } else if (d == 0) { # d == 0
-      return(matrix(numeric(0), nrow=0, ncol=0)) 
-    }
-  }
-  stop(paste("Unsupported or unrecognized modelName '", modelName, 
-             "' or variance structure not correctly specified for reconstruction after checking all known model types.", sep=""))
-}
-
-map_mixall_to_mclust <- function(mixall_model) {
-  mixall_to_mclust_map <- list(
-    "gaussian_pk_sjk"       = "VVI",  
-    "gaussian_pk_sj"        = "VII", 
-    "gaussian_pk_sk"        = "VEI",  
-    "gaussian_pk_s"         = "EII", 
-    "gaussian_p_sjk"        = "EVI", 
-    "gaussian_p_sj"         = "VII", 
-    "gaussian_p_sk"         = "EEI",
-    "gaussian_p_s"          = "EII")
-  
-  model_lower <- tolower(mixall_model)
-  
-  if (model_lower %in% names(mixall_to_mclust_map)) {
-    return(mixall_to_mclust_map[[model_lower]])
-  }
-  
-  if (grepl("gaussian.*pk.*sjk", model_lower)) return("VVI")
-  if (grepl("gaussian.*pk.*sj", model_lower)) return("VII") 
-  if (grepl("gaussian.*pk.*sk", model_lower)) return("VEI")
-  if (grepl("gaussian.*pk.*s$", model_lower)) return("EII")
-  if (grepl("gaussian.*p.*sjk", model_lower)) return("EVI")
-  if (grepl("gaussian.*p.*sj", model_lower)) return("VII")
-  if (grepl("gaussian.*p.*sk", model_lower)) return("EEI")
-  if (grepl("gaussian.*p.*s$", model_lower)) return("EII")
-  
-  warning(paste("Unknown MixAll model:", mixall_model, 
-                "- using VVI as default"))
-  return("VVI")
-}
-
-
-map_rmixmod_to_mclust <- function(rmixmod_model) {
-  # Rmixmod to mclust mapping
-  rmixmod_to_mclust_map <- list(
-    "Gaussian_p_L_I"        = "EII", 
-    "Gaussian_p_Lk_I"       = "VII",  
-    "Gaussian_p_L_B"        = "EEE",  
-    "Gaussian_p_Lk_B"       = "VEE",  
-    "Gaussian_p_L_Bk"       = "EEV",  
-    "Gaussian_p_Lk_Bk"      = "VEV",  
-    "Gaussian_p_L_C"        = "EVI",  
-    "Gaussian_p_Lk_C"       = "VVI",  
-    "Gaussian_p_L_D_Ak_D"   = "EEI",  
-    "Gaussian_p_Lk_D_Ak_D"  = "VEI",  
-    "Gaussian_p_L_Dk_A_Dk"  = "EVE",  
-    "Gaussian_p_Lk_Dk_A_Dk" = "VVE",
-    "Gaussian_p_L_Dk_Ak_Dk" = "EVV",  
-    "Gaussian_p_Lk_Dk_Ak_Dk"= "VVV", 
-    "Gaussian_pk_L_I"       = "EII",  
-    "Gaussian_pk_Lk_I"      = "VII",
-    "Gaussian_pk_L_B"       = "EEE", 
-    "Gaussian_pk_Lk_B"      = "VEE",
-    "Gaussian_pk_L_Bk"      = "EEV",
-    "Gaussian_pk_Lk_Bk"     = "VEV",
-    "Gaussian_pk_L_C"       = "EVI",
-    "Gaussian_pk_Lk_C"      = "VVI",
-    "Gaussian_pk_L_D_Ak_D"  = "EEI",
-    "Gaussian_pk_Lk_D_Ak_D" = "VEI",
-    "Gaussian_pk_L_Dk_A_Dk" = "EVE",
-    "Gaussian_pk_Lk_Dk_A_Dk"= "VVE", 
-    "Gaussian_pk_L_Dk_Ak_Dk"= "EVV",
-    "Gaussian_pk_Lk_Dk_Ak_Dk"="VVV"
-  )
-
-  model_clean <- gsub("^Gaussian_", "", rmixmod_model)
-  model_clean <- paste0("Gaussian_", model_clean)
-  
-  if (model_clean %in% names(rmixmod_to_mclust_map)) {
-    return(rmixmod_to_mclust_map[[model_clean]])
-  }
-  
-  if (rmixmod_model %in% names(rmixmod_to_mclust_map)) {
-    return(rmixmod_to_mclust_map[[rmixmod_model]])
-  }
-  
-  # Pattern matching
-  model_lower <- tolower(rmixmod_model)
-  if (grepl("spherical|p_l_i", model_lower)) return("EII")
-  if (grepl("diagonal|p_lk_c", model_lower)) return("VVI")
-  if (grepl("general|lk_dk_ak_dk", model_lower)) return("VVV")
-  
-  warning(paste("Unknown Rmixmod model:", rmixmod_model, 
-                "- using VVV as default"))
-  return("VVV")
-} 
-
-extract_rmixmod_model <- function(model_string) {
-  if (grepl("mixmodGaussianModel", model_string)) {
-    
-    listmodels_pattern <- 'listModels\\s*=\\s*c\\s*\\(\\s*"([^"]+)"'
-    listmodels_match <- regmatches(model_string, 
-                                   regexpr(listmodels_pattern, model_string, perl = TRUE))
-    
-    if (length(listmodels_match) > 0) {
-      model_name <- gsub(listmodels_pattern, '\\1', listmodels_match, perl = TRUE)
-      return(model_name)
-    }
-    
-    family_match <- regmatches(model_string, 
-                               regexpr('family\\s*=\\s*"([^"]+)"', model_string, perl = TRUE))
-    
-    if (length(family_match) > 0) {
-      family <- gsub('family\\s*=\\s*"([^"]+)"', '\\1', family_match, perl = TRUE)
-      
-      family_to_rmixmod <- list(
-        "spherical" = "Gaussian_pk_L_I",
-        "diagonal" = "Gaussian_pk_Lk_C", 
-        "general" = "Gaussian_pk_Lk_Dk_Ak_Dk",
-        "gaussian_pk_l_i" = "Gaussian_pk_L_I",
-        "gaussian_pk_lk_c" = "Gaussian_pk_Lk_C",
-        "gaussian_pk_lk_dk_ak_dk" = "Gaussian_pk_Lk_Dk_Ak_Dk"
-      )
-      
-      family_lower <- tolower(family)
-      
-      if (family_lower %in% names(family_to_rmixmod)) {
-        return(family_to_rmixmod[[family_lower]])
-      } else {
-        # If it's already in Rmixmod format, return as is (with proper casing)
-        if (grepl("^gaussian_p[k]?_l[k]?_", family_lower)) {
-          # Convert to proper Rmixmod format
-          parts <- strsplit(family_lower, "_")[[1]]
-          proper_case <- paste(
-            "Gaussian",
-            ifelse(parts[2] == "pk", "pk", "p"),
-            paste(toupper(substring(parts[3:length(parts)], 1, 1)), 
-                  substring(parts[3:length(parts)], 2), 
-                  sep = "", collapse = "_"),
-            sep = "_"
-          )
-          return(proper_case)
-        }
-        
-        warning(paste("Unknown family:", family, "- using default Gaussian_pk_Lk_C"))
-        return("Gaussian_pk_Lk_C")
-      }
-    }
-  }
-  if (grepl("^Gaussian_p[k]?_", model_string)) {
-    return(model_string)
-  }
-  
-  warning(paste("Could not parse model string:", model_string, "- using default"))
-  return("Gaussian_pk_Lk_C")
-}
-
-map_to_mclust <- function(model_name, package_source = NULL) {
-  if (is.null(package_source)) {
-    model_lower <- tolower(model_name)
-    
-    if (grepl("gaussian_p[k]?_s[jk]?[jk]?", model_lower)) {
-      package_source <- "mixall"
-    }
-    else if (grepl("gaussian_p[k]?_l[k]?_[bicd]", model_lower)) {
-      package_source <- "rmixmod"
-    }
-    else if (grepl("^[evi]{3}$", model_lower)) {
-      package_source <- "mclust"
-      return(toupper(model_name)) 
-    }
-    else {
-      package_source <- "mixall"
-    }
-  }
-  
-  switch(tolower(package_source),
-         "mixall" = map_mixall_to_mclust(model_name),
-         "rmixmod" = map_rmixmod_to_mclust(model_name), 
-         "mclust" = toupper(model_name),
-         {
-           warning(paste("Unknown package source:", package_source))
-           map_mixall_to_mclust(model_name)
+  # Multivariate model
+  switch(modelName,
+         "EII" = {
+           if (length(variance_struct$sigmasq) == 1)
+             return(diag(variance_struct$sigmasq, d))
+         },
+         "VII" = {
+           if (length(variance_struct$sigmasq) >= g)
+             return(diag(variance_struct$sigmasq[g], d))
+         },
+         "EEI" =, "VEI" =, "EVI" =, "VVI" = {
+           if (!is.null(variance_struct$scale) && !is.null(variance_struct$shape)) {
+             scale_val <- if (modelName %in% c("EEI", "EVI")) 
+               variance_struct$scale else variance_struct$scale[g]
+             shape_vec <- if (modelName %in% c("EEI", "VEI")) 
+               variance_struct$shape else variance_struct$shape[,g]
+             return(diag(scale_val * shape_vec, d))
+           }
+         },
+         "EEE" = {
+           if (!is.null(variance_struct$Sigma))
+             return(variance_struct$Sigma)
+         },
+         "VVV" = {
+         },
+         # Ellipsoidal models
+         "EEV" =, "EVE" =, "EVV" =, "VEE" =, "VEV" =, "VVE" = {
+           if (!is.null(variance_struct$scale) && 
+               !is.null(variance_struct$shape) && 
+               !is.null(variance_struct$orientation)) {
+             # Corrected scale extraction
+             scale_val <- if (modelName %in% c("EEV", "EVE", "EVV")) 
+               variance_struct$scale else variance_struct$scale[g]
+             shape_vec <- if (modelName %in% c("EVE", "VEE")) 
+               variance_struct$shape else variance_struct$shape[,g]
+             orientation <- if (modelName %in% c("EEV", "VEE")) 
+               variance_struct$orientation else variance_struct$orientation[,,g]
+             
+             # Correct covariance reconstruction
+             shape_mat <- diag(shape_vec, d)
+             volume <- scale_val
+             return(volume * orientation %*% shape_mat %*% t(orientation))
+           }
          }
   )
+  
+  # Final fallback: identity matrix with warning
+  warning("Using identity covariance fallback for component ", g)
+  diag(1, d)
 }
 
-get_mclust_models <- function() {
-  c("EII", "VII", "EEI", "VEI", "EVI", "VVI", 
-    "EEE", "EVE", "VEE", "EEV", "VEV", "EVV", "VVV", "X")
+extract_model_name <- function(model_input) {
+  # Direct mclust model names
+  mclust_models <- c("EII", "VII", "EEI", "VEI", "EVI", "VVI", 
+                     "EEE", "EVE", "VEE", "EEV", "VEV", "EVV", "VVV")
+  if (toupper(model_input) %in% mclust_models) {
+    return(toupper(model_input))
+  }
+  
+  # Handle Rmixmod strings
+  if (grepl("mixmodGaussianModel", model_input, ignore.case = TRUE)) {
+    # Extract model from listModels parameter
+    if (grepl('listModels\\s*=', model_input, ignore.case = TRUE)) {
+      match <- regmatches(model_input, 
+                          regexec('listModels\\s*=\\s*c\\(?\\s*"([^"]+)"', 
+                                  model_input, ignore.case = TRUE))[[1]]
+      if (length(match) >= 2) {
+        return(tolower(match[2]))
+      }
+    }
+    
+    # Extract model from family parameter
+    if (grepl('family\\s*=', model_input, ignore.case = TRUE)) {
+      match <- regmatches(model_input, 
+                          regexec('family\\s*=\\s*"([^"]+)"', 
+                                  model_input, ignore.case = TRUE))[[1]]
+      if (length(match) >= 2) {
+        family <- tolower(match[2])
+        family_map <- c(
+          "spherical" = "gaussian_pk_l_i",
+          "diagonal"  = "gaussian_pk_lk_c",
+          "general"   = "gaussian_pk_lk_dk_ak_dk"
+        )
+        if (family %in% names(family_map)) {
+          return(family_map[family])
+        }
+        return(family)
+      }
+    }
+    
+    # Default if parsing fails
+    warning("Couldn't parse Rmixmod model: ", model_input)
+    return("gaussian_pk_lk_c")
+  }
+  
+  # Handle MixAll strings
+  if (grepl("gaussian_p", model_input, ignore.case = TRUE)) {
+    return(tolower(model_input))
+  }
+  
+  # Default for unknown models
+  warning("Unrecognized model format: ", model_input)
+  "gaussian_pk_lk_c"
 }
 
-is_valid_mclust_model <- function(model_name) {
-  toupper(model_name) %in% get_mclust_models()
-}
-
-map_and_validate_model <- function(model_name, 
-                                   package_source = NULL, 
-                                   validate = TRUE) {
-  mclust_model <- map_to_mclust(model_name, package_source)
-  
-  if (validate && !is_valid_mclust_model(mclust_model)) {
-    warning(paste("Mapped model", mclust_model, "is not a valid mclust model. Using VVV as default"))
-    mclust_model <- "VVV"
-  }
-  
-  return(mclust_model)
-}
-
-test_model_mappings <- function() {
-  cat("Testing MixAll mappings:\n")
-  mixall_models <- c("gaussian_pk_sjk", "gaussian_pk_sj", "gaussian_p_s",)
-  for (model in mixall_models) {
-    mapped <- map_mixall_to_mclust(model)
-    cat(sprintf("  %s -> %s\n", model, mapped))
-  }
-  
-  cat("\nTesting Rmixmod mappings:\n") 
-  rmixmod_models <- c("Gaussian_p_L_I", "Gaussian_pk_Lk_C", "Gaussian_p_Lk_Dk_Ak_Dk", "spherical")
-  for (model in rmixmod_models) {
-    mapped <- map_rmixmod_to_mclust(model)  
-    cat(sprintf("  %s -> %s\n", model, mapped))
-  }
-  
-  cat("\nTesting universal mapper:\n")
-  test_models <- c("gaussian_pk_sjk", "Gaussian_p_L_I", "VVI")
-  for (model in test_models) {
-    mapped <- map_to_mclust(model)
-    cat(sprintf("  %s -> %s\n", model, mapped))
-  }
+is_rmixmod_model <- function(model_string) {
+  grepl("mixmodGaussianModel", model_string, ignore.case = TRUE)
 }

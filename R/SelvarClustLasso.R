@@ -259,7 +259,7 @@ SelvarClustLasso <- function(
       # Validate imputedData
       if (is.null(clust_result$imputedData) || !is.matrix(clust_result$imputedData) || 
           !all(dim(clust_result$imputedData) == dim(x))) {
-        stop("EMClustMNARz did not return valid imputedData")
+        stop("Invalid imputedData return")
           }
 
       x_imputed_final <- sweep(clust_result$imputedData, 2, sds, "*")
@@ -269,7 +269,7 @@ SelvarClustLasso <- function(
       # Validate partition
       if (is.null(clust_result$partition) || length(clust_result$partition) != nrow(x) ||
           !all(clust_result$partition %in% 1:number_clusters)) {
-        stop("EMClustMNARz returned invalid partition")
+        stop("Invalid partition return")
       }
 
       adjustedRandIndex <- mclust::adjustedRandIndex
@@ -288,13 +288,11 @@ SelvarClustLasso <- function(
         finalModel$clust_result   <- clust_result
         }
       else {
-        if (is_rmixmod_model(models)){
-          mod <- extract_rmixmod_model(models)
+        if (is_rmixmod_model(models)) {
+          model_name <- map_to_mclust(extract_model_name(models))
+        } else {
+          model_name <- map_to_mclust(finalModel$model)
         }
-        else{
-          mod <- finalModel$model
-        }
-        model_name <- map_and_validate_model(mod)
         x_scaled_imp <- x_scaled 
         imputation_result <- tryCatch({
                                       EM_impute(
@@ -346,7 +344,7 @@ SelvarClustLasso <- function(
             }
         }            
     }
-    # if (is.null(finalModel$imputedData)) finalModel$imputedData <- x_imp_orig
+    if (is.null(finalModel$imputedData)) finalModel$imputedData <- x_imp_orig
     bestModel[[i]] <- finalModel
   }
 
@@ -365,7 +363,7 @@ SelvarClustLasso <- function(
     cat("\n==========================================\n")
     cat("Pipeline Completed\n")
     cat("==========================================\n")
-    cat("Total running time:", round(total_time, 2), "seconds\n")
+    # cat("Total running time:", round(total_time, 2), "seconds\n")
   }
 
   return(output)
@@ -418,25 +416,6 @@ ProcessModelOutput <- function(modelResult) {
   )
   class(object) <- "selvarmixext"
   return(object)
-}
-
-is_rmixmod_model <- function(models) {
-  return(grepl("mixmodGaussianModel", models))
-}
-
-is_mclust_model <- function(models){
-  mclust_models <-c(
-                    # Spherical models
-                    "EII", "VII", 
-                    
-                    # Diagonal models
-                    "EEI", "VEI", "EVI", "VVI", 
-                    
-                    # Ellipsoidal models
-                    "EEE", "VEE", "EVE", "VVE", 
-                    "EEV", "VEV", "EVV", "VVV"
-                    )
-  return(models %in% mclust_models)
 }
 
 check_scale_data <- function(x,
