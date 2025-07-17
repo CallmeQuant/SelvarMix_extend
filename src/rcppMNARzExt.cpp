@@ -356,7 +356,7 @@ List InitEMGaussianMixed(
       Named("pi_init") = as<NumericVector>(init_list["pik"]),
       Named("mu_init") = as<List>(init_list["mu"]),
       Named("sigma_init") = as<List>(init_list["sigma"]),
-      Named("alpha_init") = alpha_user
+      Named("alpha_init") = alpha_user,
       Named("beta_init") = beta_user 
     );
   }
