@@ -327,13 +327,27 @@ List InitEMGaussian(NumericMatrix YNA, int K, std::string mecha, bool diag, Null
     );
   } else {
     List init_list = as<List>(init);
+    NumericMatrix alpha_user;
+    if (init_list.containsElementNamed("alpha")) {
+      alpha_user = as<NumericMatrix>(init_list["alpha"]);
+    } else {
+      alpha_user = NumericMatrix(K, d);
+      
+      double miss_rate = 0.0;
+      int total_cells = n * d;
+      for(int i = 0; i < total_cells; ++i) if(R_IsNA(YNA[i])) miss_rate++;
+      miss_rate /= total_cells;
+
+      double alpha_val = R::qnorm(miss_rate, 0.0, 1.0, 1, 0);
+      alpha_user.fill(alpha_val);
+    }
     return List::create(
-      Named("pi_init") = as<NumericVector>(init_list["pik"]),
-      Named("mu_init") = as<List>(init_list["mu"]),
-      Named("sigma_init") = as<List>(init_list["sigma"]),
-      Named("alpha_init") = as<NumericMatrix>(init_list["alpha"])
+      _["pi_init"]    = as<NumericVector>(init_list["pik"]),
+      _["mu_init"]    = as<List>(init_list["mu"]),
+      _["sigma_init"] = as<List>(init_list["sigma"]),
+      _["alpha_init"] = alpha_user
     );
-  }
+  } 
 }
 
 // [[Rcpp::export]]

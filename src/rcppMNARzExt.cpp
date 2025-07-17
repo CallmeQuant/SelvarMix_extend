@@ -243,7 +243,6 @@ List InitEMGaussianMixed(
       mu_init[k] = mu_k;
       
       NumericMatrix sigma_k(d, d);
-      // Simplified init for sigma, using overall variance if too few points in a cluster-var pair
       arma::mat YNA_arma = Rcpp::as<arma::mat>(YNA);
       arma::vec overall_vars(d, arma::fill::ones); // Default to 1 if all NA
         for(int j=0; j<d; ++j){
@@ -327,25 +326,38 @@ List InitEMGaussianMixed(
       Named("mu_init") = mu_init,
       Named("sigma_init") = sigma_init,
       Named("alpha_init") = alpha_init,
-      Named("beta_init") = beta_init // New
+      Named("beta_init") = beta_init
     );
   } else {
     List init_list = as<List>(init);
-    // User provided initial beta, or we default to zeros if not present
+    NumericMatrix alpha_user;
     NumericMatrix beta_user;
     if (init_list.containsElementNamed("beta")) {
         beta_user = as<NumericMatrix>(init_list["beta"]);
     } else {
         beta_user = NumericMatrix(K, d);
-        beta_user.fill(0.0); // Default to zeros if not provided
+        beta_user.fill(0.0); 
     }
+   
+    if (init_list.containsElementNamed("alpha")) {
+      alpha_user = as<NumericMatrix>(init_list["alpha"]);
+    } else {
+      alpha_user = NumericMatrix(K, d);
+      
+      double miss_rate = 0.0;
+      int total_cells = n * d;
+      for(int i = 0; i < total_cells; ++i) if(R_IsNA(YNA[i])) miss_rate++;
+      miss_rate /= total_cells;
 
+      double alpha_val = R::qnorm(miss_rate, 0.0, 1.0, 1, 0);
+      alpha_user.fill(alpha_val);
+    }
     return List::create(
       Named("pi_init") = as<NumericVector>(init_list["pik"]),
       Named("mu_init") = as<List>(init_list["mu"]),
       Named("sigma_init") = as<List>(init_list["sigma"]),
-      Named("alpha_init") = as<NumericMatrix>(init_list["alpha"]),
-      Named("beta_init") = beta_user // New
+      Named("alpha_init") = alpha_user
+      Named("beta_init") = beta_user 
     );
   }
 }

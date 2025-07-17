@@ -251,8 +251,38 @@ SelvarClustLasso <- function(
     if (use_missing_pattern) {
       if (verbose) cat("Fitting MNARz for criterion", model_name, "\n")
       if (!exists("EMClustMNARz")) stop("EMClustMNARz function is missing")
-      em_call <- c(list(x = x_scaled, K = number_clusters,
-                        criterion = model_name), mnarz_control)
+      init_control <- list(
+                          init = mnarz_control$initialize, 
+                          n.start = 25,
+                          use_glasso = mnarz_control$use_glasso, 
+                          lambda_omega_0 = mnarz_control$lambda_omega_0
+                        )
+      if (is.null(mnarz_control$init)) {
+        cat("Performing initialization...\n")
+        init_params_robust <- InitParameterRobust(
+          data = x_imp_scaled,
+          nbClust = number_clusters,
+          init = init_control$init,
+          n.start = init_control$n.start,
+          use_glasso = init_control$use_glasso,
+          lambda_omega_0 = init_control$lambda_omega_0
+        )
+        mu_list <- lapply(1:number_clusters, function(k) init_params_robust$Mu[k, ])
+        sigma_list <- lapply(1:number_clusters, function(k) init_params_robust$SigmaCube[, , k])
+        initial_values <- list(
+                              pik = init_params_robust$prop,
+                              mu = mu_list,
+                              sigma = sigma_list
+                            )
+      } else {
+      initial_values <- mnarz_control$init
+      }
+      em_fun_args <- names(formals(EMClustMNARz))
+      valid_em_args <- mnarz_control[names(mnarz_control) %in% em_fun_args]
+
+      em_call <- c(list(x = x_scaled, 
+                  K = number_clusters,
+                  init = initial_values), valid_em_args)
 
       clust_result <- do.call(EMClustMNARz, em_call)
       
