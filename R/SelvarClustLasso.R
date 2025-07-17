@@ -278,11 +278,13 @@ SelvarClustLasso <- function(
       initial_values <- mnarz_control$init
       }
       em_fun_args <- names(formals(EMClustMNARz))
-      valid_em_args <- mnarz_control[names(mnarz_control) %in% em_fun_args]
+      args_to_filter <- em_fun_args[em_fun_args != "init"]
+      valid_em_args <- mnarz_control[names(mnarz_control) %in% args_to_filter]
 
-      em_call <- c(list(x = x_scaled, 
-                  K = number_clusters,
-                  init = initial_values), valid_em_args)
+      em_call <- c(list(
+                        x = x_scaled, 
+                        K = number_clusters,
+                        init = initial_values), valid_em_args)
 
       clust_result <- do.call(EMClustMNARz, em_call)
       
