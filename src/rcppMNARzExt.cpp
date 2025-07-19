@@ -31,7 +31,6 @@ List LoglikelihoodObsGaussianMixed(
     const NumericMatrix   &beta,
     const NumericVector   &prop_pi,
     const LogicalVector   &is_mnar,
-    /* optional: conditional mean & variance of Y_ij for missing cells */
     Nullable<List>  E_mu_list  = R_NilValue,
     Nullable<List>  E_sig_list = R_NilValue   )
 {
@@ -39,12 +38,10 @@ List LoglikelihoodObsGaussianMixed(
   const int d = YNA.ncol();
   const int K = prop_pi.size();
 
-  /* ---- mask matrix -------------------------------------------------- */
   NumericMatrix C(n,d);
   for(int i=0;i<n;++i)
     for(int j=0;j<d;++j) C(i,j) = R_IsNA(YNA(i,j));
 
-  /* ---- optional conditional stats for MNAR integral ----------------- */
   const bool use_cond = (E_mu_list.isNotNull() && E_sig_list.isNotNull());
   List  E_mu,  E_sig;
   if(use_cond){
@@ -52,7 +49,7 @@ List LoglikelihoodObsGaussianMixed(
     E_sig = List(E_sig_list);
   }
 
-  /* ---- cache distinct missing-data patterns ------------------------- */
+  // cache distinct missing-data patterns 
   std::vector<NumericVector> uniqPat;
   std::vector< IntegerVector> patIdx;
   for(int i=0;i<n;++i){
@@ -67,7 +64,7 @@ List LoglikelihoodObsGaussianMixed(
   }
 
   NumericMatrix logprob(n,K);          // log p_i(k)
-  /* ================================================================ */
+  
   for(size_t p=0;p<uniqPat.size();++p){
     const NumericVector &pat = uniqPat[p];
     const IntegerVector &idx = patIdx[p];
@@ -76,16 +73,14 @@ List LoglikelihoodObsGaussianMixed(
     for(int j=0;j<d;++j) if(pat[j]==0) obsIdx.push_back(j);
     const int d_obs = obsIdx.size();
 
-    /* iterate over all subjects sharing this pattern ---------------- */
     for(int t=0;t<idx.size();++t){
       const int i = idx[t];
 
-      /* Y_obs ------------------------------------------------------- */
       NumericVector y_obs_rcpp(d_obs);
       for(int jj=0;jj<d_obs;++jj) y_obs_rcpp[jj] = YNA(i,obsIdx[jj]);
 
       for(int k=0;k<K;++k){
-        /* -------- block-determinant & Mahalanobis ------------------ */
+        // Block-diagonal and determinant calculations
         double log_y = 0.0;
         if(d_obs>0){
           arma::vec y_obs   = as<arma::vec>(y_obs_rcpp);
@@ -97,7 +92,7 @@ List LoglikelihoodObsGaussianMixed(
           arma::vec mu_o   = mu_k.elem(obs_u);
           arma::mat Sig_oo = Sig_k.submat(obs_u,obs_u);
 
-          /* ⚠  tiny ridge keeps SPD after sub-setting                 */
+          // Ensure Sig_oo is symmetric and positive definite
           Sig_oo = arma::symmatu(Sig_oo);
           Sig_oo.diag() += 1e-8;
 
@@ -113,53 +108,50 @@ List LoglikelihoodObsGaussianMixed(
           }
         } /* d_obs==0 ⇒ log_y stays 0  */
 
-        /* -------- missing-mechanism terms -------------------------- */
+        // Missing mechanism probabilities
+        // Updated the logic to handle both MAR and MNAR cases
         double log_mask = 0.0;
 
-        for(int j=0;j<d;++j){
+        // Inside the k-cluster loop:
+        double log_mask = 0.0;
+        for(int j=0; j<d; ++j) {
           const bool miss = (pat[j]==1);
           const bool MNAR = is_mnar[j];
-
-          double prob1;                       // P(C=1)
-
-          if(!MNAR){ //-------------------------------- MAR
-            prob1 = R::pnorm(alpha(k,j),0,1,1,0);
-          }else{ //----------------------------------- MNAR
-            double mu_star = 0.0, var_star = 0.0;
-
-            if(miss){           // use conditional stats
-              if(use_cond){
-                List  mu_i  = as<List>(E_mu[i ]);
-                List  sig_i = as<List>(E_sig[i]);
-                NumericVector mu_ik  = mu_i [k];
-                NumericMatrix Sig_ik = sig_i[k];
-                mu_star  = mu_ik[j];
-                var_star = Sig_ik(j,j);
-              }else{ /* fallback: plug-in mean, variance=0  */
-                mu_star  = 0.0;
-                var_star = 0.0;
-              }
-            }else{             // observed
-              mu_star  = YNA(i,j);
-              var_star = 0.0;
-            }
-
-            double denom = std::sqrt(1.0 + beta(k,j)*beta(k,j)*var_star);
-            double arg   = (alpha(k,j) + beta(k,j)*mu_star)/denom;
-            prob1 = R::pnorm(arg,0,1,1,0);
+          
+          if(MNAR) {
+            // Pure MNARz: depends only on cluster
+            double p_mnar = R::pnorm(alpha(k,j), 0.0, 1.0, 1, 0);
+            p_mnar = std::max(std::min(p_mnar, 1.0-1e-12), 1e-12);
+            log_mask += miss ? std::log(p_mnar) : std::log1p(-p_mnar);
           }
-
-          prob1 = std::min(std::max(prob1,1e-12),1-1e-12);   // clamp
-          log_mask += miss ? std::log(prob1)
-                           : std::log(1-prob1);
-        } // j
-
+          else {
+            // MAR: depends on expected value
+            double predictor;
+            if(miss) {
+              // Missing: use conditional expectation
+              if(use_cond) {
+                List mu_i = as<List>(E_mu[i]);
+                NumericVector mu_ik = mu_i[k];
+                predictor = mu_ik[j];
+              } else {
+                predictor = 0.0; // Fallback
+              }
+            } else {
+              // Observed: use actual value
+              predictor = YNA(i,j);
+            }
+            double linear_pred = alpha(k,j) + beta(k,j) * predictor;
+            double p_mar = R::pnorm(linear_pred, 0.0, 1.0, 1, 0);
+            p_mar = std::max(std::min(p_mar, 1.0-1e-12), 1e-12);
+            log_mask += miss ? std::log(p_mar) : std::log1p(-p_mar);
+          }
+        }
         logprob(i,k) = std::log(prop_pi[k]) + log_y + log_mask;
       } // k
     }   // i
   }     // pattern loop
 
-  /* -------- log-sum-exp for each i ---------------------------------- */
+  // Normalize log probabilities
   NumericVector m(n);
   for(int i=0;i<n;++i){
     m[i] = max(logprob(i,_));
@@ -172,7 +164,7 @@ List LoglikelihoodObsGaussianMixed(
   for(int i=0;i<n;++i){
     if(row_s[i]>0) loglik += m[i] + std::log(row_s[i]);
     else{
-      loglik += m[i] - 700;          // ⚠ indicates an obs with all −∞
+      loglik += m[i] - 700;          
       Rcpp::Rcout<<"Row "<<i<<" has zero normaliser\n";
     }
   }
@@ -304,22 +296,46 @@ List InitEMGaussianMixed(
       sigma_init[k] = sigma_k;
     }
     
-    NumericMatrix alpha_init(K, d); // Initialize alpha
-    // Simple initialization for alpha (e.g. based on overall missing rate or to 0)
-    double overall_miss_rate = 0.0;
-    int total_cells = n * d;
-    for(int i=0; i<n; ++i) for(int j=0; j<d; ++j) if(R_IsNA(YNA(i,j))) overall_miss_rate++;
-    overall_miss_rate /= total_cells;
-    double alpha_val_global = R::qnorm(overall_miss_rate, 0.0, 1.0, 1, 0); // qnorm of overall missing rate
+    // Initialize alpha and beta based on mechanism
+    NumericMatrix alpha_init(K, d);
+    NumericMatrix beta_init(K, d);
+    beta_init.fill(0.0); 
 
-    for(int k = 0; k < K; k++) {
-      for(int j = 0; j < d; j++) {
-        alpha_init(k, j) = alpha_val_global; // Or simply 0.0
+    // Calculate overall missing rates per variable
+    NumericVector var_miss_rate(d);
+    for(int j=0; j<d; ++j) {
+      int miss_count = 0;
+      for(int i=0; i<n; ++i) if(R_IsNA(YNA(i,j))) miss_count++;
+      var_miss_rate[j] = std::max(1e-6, std::min(1.0-1e-6, static_cast<double>(miss_count)/n));
+    }
+
+    for(int k=0; k<K; ++k) {
+      IntegerVector class_obs;
+      for(int i=0; i<n; ++i) if(Z_init(i,k) == 1.0) class_obs.push_back(i);
+      int nk = class_obs.size();
+
+      // Handle empty clusters
+      if (n_k == 0) {
+        for (int j = 0; j < d; ++j) alpha_init(k, j) = 0.0;
+        continue;
+      }
+
+      for(int j=0; j<d; ++j) {
+        if(is_mnar[j]) {
+          // MNARz: Cluster-specific initialization
+          int miss_count = 0;
+          for(int idx=0; idx<nk; ++idx) {
+            int i = class_obs[idx];
+            if(R_IsNA(YNA(i,j))) miss_count++;
+          }
+          double miss_rate = std::max(1e-6, std::min(1.0-1e-6, static_cast<double>(miss_count)/nk));
+          alpha_init(k,j) = R::qnorm(miss_rate, 0.0, 1.0, 1, 0);
+        } else {
+          // MAR: Variable-specific initialization (same for all clusters)
+          alpha_init(k,j) = R::qnorm(var_miss_rate[j], 0.0, 1.0, 1, 0);
+        }
       }
     }
-    
-    NumericMatrix beta_init(K, d); 
-    beta_init.fill( 0.0 );// Initialize beta to all zeros
     
     return List::create(
       Named("pi_init") = prop_pi,
@@ -366,149 +382,107 @@ List InitEMGaussianMixed(
 List MechanismEMGLMMixed(
     NumericMatrix YNA, 
     NumericMatrix tik, 
-    std::string mecha, // Can determine if we use old or new logic
-    LogicalVector is_mnar, // New
-    List E_y_list, // Expected Y for s_j terms: E[Y_ij|Y_i^obs,Z_i=k]
-    NumericMatrix current_alpha, // For cases where some alphas are fixed
-    NumericMatrix current_beta   // For cases where some betas are fixed or for fallback
-  ) {
+    std::string mecha,
+    LogicalVector is_mnar,
+    List E_y_list,
+    NumericMatrix current_alpha,
+    NumericMatrix current_beta
+) {
   int n = YNA.nrow();
   int d = YNA.ncol();
   int K = tik.ncol();
   
   NumericMatrix C(n, d);
-  for(int i = 0; i < n; i++) for(int j = 0; j < d; j++) C(i, j) = R_IsNA(YNA(i, j)) ? 1.0 : 0.0;
+  for(int i = 0; i < n; i++) 
+    for(int j = 0; j < d; j++) 
+      C(i, j) = R_IsNA(YNA(i, j)) ? 1.0 : 0.0;
   
   NumericMatrix alpha_new(K, d);
   NumericMatrix beta_new(K, d);
-  beta_new.fill(0.0); // Initialize beta_new with zeros
+  beta_new.fill(0.0); 
   
   Environment stats = Environment::namespace_env("stats");
   Function glm = stats["glm"];
   Function binomial = stats["binomial"];
-  RObject family = binomial(Rcpp::Named("link", "probit")); // Using probit link as in draft
+  RObject family = binomial(Rcpp::Named("link", "probit"));
   
-  // This will implement the new mixed MAR/MNAR logic from the draft
-  // The `mecha` string could be "MIXED_MAR_MNAR" or similar
-  // For simplicity, we assume if is_mnar is provided, we use the new logic.
-  
-  for (int j = 0; j < d; ++j) { // For each variable
-    for (int k = 0; k < K; ++k) { // For each cluster
-      NumericVector y_response_Cij = C(_, j);
-      NumericVector weights_tik = tik(_, k);
+  // Separate handling for MAR and MNARz
+  for (int j = 0; j < d; ++j) {
+    for (int k = 0; k < K; ++k) {
+      NumericVector y_response = C(_, j);
+      NumericVector weights = tik(_, k);
       
-      // Filter out zero weights to avoid issues with GLM
       std::vector<double> y_filt;
       std::vector<double> w_filt;
-      std::vector<double> s_j_pred_filt; // Only for MNAR
+      std::vector<double> predictors; // Only for MAR
 
-      bool has_positive_weights = false;
-      for(int i=0; i<n; ++i) {
-          if(weights_tik[i] > 1e-8){ // Small tolerance for weights
-            has_positive_weights = true;
-            break;
-          }
-      }
-      if(!has_positive_weights) { // No data points contribute to this cluster-variable pair
-          alpha_new(k,j) = current_alpha(k,j); // Keep previous alpha
-          if(is_mnar[j]) beta_new(k,j) = current_beta(k,j); // Keep previous beta
-          continue;
-      }
-
-
-      if (!is_mnar[j]) { // MAR variable: C_ij ~ 1 (intercept only for alpha_kj)
-        for(int i=0; i<n; ++i) {
-            if(weights_tik[i] > 1e-8){
-                 y_filt.push_back(y_response_Cij[i]);
-                 w_filt.push_back(weights_tik[i]);
-            }
-        }
-        if(y_filt.empty()){
-            alpha_new(k,j) = current_alpha(k,j);
-            continue;
-        }
-        DataFrame df_mar = DataFrame::create(_["y"] = NumericVector(y_filt.begin(), y_filt.end()));
-        
-        List glm_fit_mar;
-        try {
-            glm_fit_mar = glm(
-              _["formula"] = Formula("y ~ 1"),
-              _["family"] = family,
-              _["data"] = df_mar,
-              _["weights"] = NumericVector(w_filt.begin(), w_filt.end())
-            );
-            NumericVector coef_mar = glm_fit_mar["coefficients"];
-            alpha_new(k, j) = coef_mar[0];
-            // beta_new(k, j) remains 0.0 for MAR
-        } catch (Rcpp::exception& e) {
-            Rcpp::Rcout << "GLM failed for MAR (k=" << k << ", j=" << j << "): " << e.what() << ". Using previous alpha." << std::endl;
-            alpha_new(k,j) = current_alpha(k,j);
-        }
-
-      } else { // MNAR variable: C_ij ~ 1 + s_j(Y_ij) (for alpha_kj and beta_kj)
-        NumericVector s_j_predictor(n);
-        List E_y_i_k_list = List(E_y_list); // Ensure it's a List
-
-        for (int i = 0; i < n; ++i) {
-          if (C(i, j) == 0) { // Observed Y_ij
-            s_j_predictor[i] = YNA(i, j);
-          } else { // Missing Y_ij, use E[Y_ij | Y_obs, Z_i=k]
-            List E_y_i = as<List>(E_y_i_k_list[i]);
+      // Filter observations with meaningful weights
+      for(int i = 0; i < n; ++i) {
+        if(weights[i] > 1e-8) {
+          y_filt.push_back(y_response[i]);
+          w_filt.push_back(weights[i]);
+          
+          // MAR: Use expected value from E-step
+          if (!is_mnar[j]) {
+            List E_y_i = as<List>(E_y_list[i]);
             NumericVector E_y_ik = as<NumericVector>(E_y_i[k]);
-            s_j_predictor[i] = E_y_ik[j];
+            predictors.push_back(E_y_ik[j]);
           }
         }
-        
-        for(int i=0; i<n; ++i) {
-            if(weights_tik[i] > 1e-8){
-                 y_filt.push_back(y_response_Cij[i]);
-                 w_filt.push_back(weights_tik[i]);
-                 s_j_pred_filt.push_back(s_j_predictor[i]);
-            }
-        }
-         if(y_filt.empty()){
-            alpha_new(k,j) = current_alpha(k,j);
-            beta_new(k,j) = current_beta(k,j);
-            continue;
-        }
+      }
+      
+      if(y_filt.empty()) {
+        alpha_new(k, j) = current_alpha(k, j);
+        beta_new(k, j) = current_beta(k, j);
+        continue;
+      }
 
-        DataFrame df_mnar = DataFrame::create(
-            _["y"] = NumericVector(y_filt.begin(), y_filt.end()), 
-            _["s_j"] = NumericVector(s_j_pred_filt.begin(), s_j_pred_filt.end())
-        );
-        
-        List glm_fit_mnar;
-        try {
-            glm_fit_mnar = glm(
-              _["formula"] = Formula("y ~ s_j"),
-              _["family"] = family,
-              _["data"] = df_mnar,
-              _["weights"] = NumericVector(w_filt.begin(), w_filt.end())
-            );
-            NumericVector coef_mnar = glm_fit_mnar["coefficients"];
-            if (coef_mnar.size() == 2) {
-                 alpha_new(k, j) = coef_mnar[0]; // Intercept
-                 beta_new(k, j) = coef_mnar[1];  // Coefficient for s_j
-            } else { // GLM might have removed s_j due to collinearity or other issues
-                 Rcpp::Rcout << "GLM for MNAR (k=" << k << ", j=" << j << ") returned " << coef_mnar.size() << " coeffs. Using intercept only." << std::endl;
-                 alpha_new(k,j) = coef_mnar[0];
-                 beta_new(k,j) = 0.0; // Fallback for beta
-            }
-        } catch (Rcpp::exception& e) {
-            Rcpp::Rcout << "GLM failed for MNAR (k=" << k << ", j=" << j << "): " << e.what() << ". Using previous alpha/beta." << std::endl;
-            alpha_new(k,j) = current_alpha(k,j);
-            beta_new(k,j) = current_beta(k,j);
+      try {
+        if (is_mnar[j]) {
+          // MNARz: Intercept-only model (cluster-specific)
+          DataFrame df = DataFrame::create(_["y"] = NumericVector(y_filt.begin(), y_filt.end()));
+          List glm_fit = glm(
+            _["formula"] = Formula("y ~ 1"),
+            _["family"] = family,
+            _["data"] = df,
+            _["weights"] = NumericVector(w_filt.begin(), w_filt.end())
+          );
+          
+          NumericVector coef = glm_fit["coefficients"];
+          alpha_new(k, j) = coef[0];
+          // beta_new remains 0 (no data dependence)
+        } 
+        else {
+          // MAR: Self-masking model (using expected value)
+          DataFrame df = DataFrame::create(
+            _["y"] = NumericVector(y_filt.begin(), y_filt.end()),
+            _["x"] = NumericVector(predictors.begin(), predictors.end())
+          );
+          
+          List glm_fit = glm(
+            _["formula"] = Formula("y ~ x"),
+            _["family"] = family,
+            _["data"] = df,
+            _["weights"] = NumericVector(w_filt.begin(), w_filt.end())
+          );
+          
+          NumericVector coef = glm_fit["coefficients"];
+          alpha_new(k, j) = coef[0];
+          beta_new(k, j) = coef[1];
         }
+      } 
+      catch (...) {
+        alpha_new(k, j) = current_alpha(k, j);
+        beta_new(k, j) = current_beta(k, j);
       }
     }
   }
   
   return List::create(
-    Named("alpha_new") = alpha_new,
-    Named("beta_new") = beta_new // New
+    _["alpha_new"] = alpha_new,
+    _["beta_new"] = beta_new
   );
 }
-
 
 // [[Rcpp::export]]
 List EMGaussianMixed(
