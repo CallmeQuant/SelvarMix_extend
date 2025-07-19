@@ -315,7 +315,7 @@ List InitEMGaussianMixed(
       int nk = class_obs.size();
 
       // Handle empty clusters
-      if (n_k == 0) {
+      if (nk == 0) {
         for (int j = 0; j < d; ++j) alpha_init(k, j) = 0.0;
         continue;
       }
