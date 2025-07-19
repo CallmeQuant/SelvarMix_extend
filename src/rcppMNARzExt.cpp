@@ -110,8 +110,6 @@ List LoglikelihoodObsGaussianMixed(
 
         // Missing mechanism probabilities
         // Updated the logic to handle both MAR and MNAR cases
-        double log_mask = 0.0;
-
         // Inside the k-cluster loop:
         double log_mask = 0.0;
         for(int j=0; j<d; ++j) {
